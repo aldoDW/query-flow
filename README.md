@@ -21,7 +21,7 @@ Agregat/Kategori_A/
     Agregat_1c.sql
     Agregat_1d.sql
 
-→ Hasil_Kategori_A.xlsx
+→ Agregat_Kategori_A.xlsx
     Tabel 1A - Judul tabel A
     Tabel 1B - Judul tabel B
     Tabel 1C - Judul tabel C
@@ -154,11 +154,11 @@ Semua SQL dalam folder dijalankan berurutan. Query berikutnya dimulai setelah qu
 
 **SQL dalam folder dijalankan berdasarkan natural filename order.** Contoh: `Tabel1.sql`, `Tabel2.sql`, …, `Tabel10.sql`; suffix `1a`, `1b`, `1c`, `1d` tetap berurutan. Snapshot lama juga diurutkan saat dibuka kembali.
 
-Satu folder menghasilkan satu workbook, misalnya `Kategori_A` → `Hasil_Kategori_A.xlsx`, diunduh setelah seluruh query berhasil.
+Satu folder menghasilkan satu workbook, misalnya `Agregat/Kategori_A` → `Agregat_Kategori_A.xlsx`, diunduh setelah seluruh query berhasil.
 
 ## Excel Output
 
-- Workbook: `Hasil_<NamaFolder>.xlsx`; karakter khusus diganti underscore.
+- Workbook mengikuti path folder tanpa awalan `Hasil_`: `Agregat/Kategori_A` → `Agregat_Kategori_A.xlsx`. Pemisah folder dan karakter khusus diganti underscore sehingga folder Agregat dan Mikro dapat dibedakan.
 - Satu hasil SQL menjadi satu sheet, mengikuti urutan eksekusi.
 - Nama sheet memakai nomor dari segmen terakhir nama file dan judul SQL: `Agregat_1a.sql` dengan metadata `Judul: Jumlah usaha` → `Tabel 1A - Jumlah usaha`. Jika metadata tidak tersedia, bagian judul memakai nama file tanpa `.sql`. Judul lengkap tetap ditulis pada baris 1 meskipun nama sheet dipotong.
 - Nama sheet maksimal 31 karakter; karakter terlarang diganti dan nama duplikat diberi suffix angka.

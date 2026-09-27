@@ -42,8 +42,8 @@ export function buildWorkbook(results: QueryResult[]): ExcelJS.Workbook {
 }
 
 export function workbookFilename(path: string): string {
-  const folder = path.replace(/\/+$/, "").split("/").at(-1) || "Query";
-  return `Hasil_${folder.replace(/[^a-z0-9_-]/gi, "_")}.xlsx`;
+  const folder = path.replace(/^\/+|\/+$/g, "") || "Query";
+  return `${folder.replace(/[^a-z0-9_-]/gi, "_")}.xlsx`;
 }
 
 export async function exportFolder(path: string, results: QueryResult[]): Promise<void> {

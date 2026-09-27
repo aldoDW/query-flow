@@ -23,5 +23,6 @@ it("uses natural ordering for imports and restores older snapshots without modif
 });
 
 it("names workbooks after the selected folder", () => {
-  expect(workbookFilename("Agregat/Kategori_A")).toBe("Hasil_Kategori_A.xlsx");
+  expect(workbookFilename("Agregat/Kategori_A")).toBe("Agregat_Kategori_A.xlsx");
+  expect(workbookFilename("Mikro/Kategori_A/Hortikultura")).toBe("Mikro_Kategori_A_Hortikultura.xlsx");
 });
