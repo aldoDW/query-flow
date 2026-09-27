@@ -1,0 +1,14 @@
+node_modules/
+dist/
+coverage/
+.DS_Store
+*.log
+.env
+.env.*
+!.env.example
+local-data/
+snapshots/
+query-results/
+*.xlsx
+*.csv
+*.sql
