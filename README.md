@@ -22,10 +22,10 @@ Agregat/Kategori_A/
     Agregat_1d.sql
 
 → Hasil_Kategori_A.xlsx
-    Tabel 1A
-    Tabel 1B
-    Tabel 1C
-    Tabel 1D
+    Tabel 1A - Judul tabel A
+    Tabel 1B - Judul tabel B
+    Tabel 1C - Judul tabel C
+    Tabel 1D - Judul tabel D
 ```
 
 ## Workflow
@@ -160,7 +160,7 @@ Satu folder menghasilkan satu workbook, misalnya `Kategori_A` → `Hasil_Kategor
 
 - Workbook: `Hasil_<NamaFolder>.xlsx`; karakter khusus diganti underscore.
 - Satu hasil SQL menjadi satu sheet, mengikuti urutan eksekusi.
-- Nama sheet dari segmen terakhir setelah underscore, tanpa `.sql`: `Agregat_1a.sql` → `Tabel 1A`; `rantabF_tabel1.sql` → `Tabel 1`.
+- Nama sheet memakai nomor dari segmen terakhir nama file dan judul SQL: `Agregat_1a.sql` dengan metadata `Judul: Jumlah usaha` → `Tabel 1A - Jumlah usaha`. Jika metadata tidak tersedia, bagian judul memakai nama file tanpa `.sql`. Judul lengkap tetap ditulis pada baris 1 meskipun nama sheet dipotong.
 - Nama sheet maksimal 31 karakter; karakter terlarang diganti dan nama duplikat diberi suffix angka.
 - Baris 1: metadata `Judul:` atau fallback nama file, digabung selebar kolom hasil.
 - Baris 2: nama kolom.

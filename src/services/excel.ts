@@ -1,8 +1,11 @@
 import ExcelJS from "exceljs";
 
-export function sheetName(filename: string, used: string[]): string {
+export function sheetName(filename: string, used: string[], title = ""): string {
   const suffix = filename.replace(/\.sql$/i, "").split("_").at(-1) ?? "Hasil";
-  const base = `Tabel ${suffix.replace(/^tabel\s*/i, "").toUpperCase()}`.replace(/[\\/*?:[\]]/g, " ").slice(0, 31);
+  const label = `Tabel ${suffix.replace(/^tabel\s*/i, "").toUpperCase()}`;
+  const base = `${label}${title.trim() ? ` - ${title.trim()}` : ""}`
+    .replace(/[\\/*?:[\]]/g, " ").replace(/\s+/g, " ")
+    .slice(0, 31).replace(/'+$/g, "").trimEnd();
   let name = base;
   let index = 2;
   while (used.some((value) => value.toLowerCase() === name.toLowerCase())) {
@@ -23,7 +26,7 @@ export function buildWorkbook(results: QueryResult[]): ExcelJS.Workbook {
   const workbook = new ExcelJS.Workbook();
   const used: string[] = [];
   for (const result of results) {
-    const name = sheetName(result.filename, used);
+    const name = sheetName(result.filename, used, result.title);
     used.push(name);
     const sheet = workbook.addWorksheet(name);
     sheet.addRow([result.title]);
