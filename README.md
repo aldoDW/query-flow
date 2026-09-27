@@ -135,7 +135,7 @@ Tanggal     : 2026-09-25
 */
 ```
 
-`Judul:` menjadi judul baris pertama sheet Excel. Jika tidak tersedia, judul memakai nama file tanpa `.sql`. Metadata lainnya untuk dokumentasi; nama sheet mengikuti aturan nama file.
+`Judul:`, `Nama Tabel:`, dan `Judul Tabel:` didukung tanpa membedakan huruf besar/kecil. Nilai pertama yang tidak kosong dalam komentar blok pertama menjadi judul baris pertama Excel dan bagian judul pada nama sheet. Jika tidak tersedia, judul memakai nama file tanpa `.sql`. Metadata lainnya untuk dokumentasi.
 
 ## Menjalankan Query
 

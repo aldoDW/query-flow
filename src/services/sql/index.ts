@@ -5,7 +5,7 @@ const PARAMETER_VALUE = (alias: string): RegExp =>
 
 export function extractSqlTitle(sql: string, fallback: string): string {
   const comment = sql.match(/\/\*([\s\S]*?)\*\//)?.[1];
-  const title = comment?.match(/^\s*Judul\s*:\s*(.+?)\s*$/im)?.[1]?.trim();
+  const title = comment?.match(/^[\t ]*(?:\*[\t ]*)?(?:Nama[\t ]+Tabel|Judul[\t ]+Tabel|Judul)[\t ]*:[\t ]*(\S[^\r\n]*)/im)?.[1]?.trim();
   return title || fallback.replace(/\.sql$/i, "");
 }
 

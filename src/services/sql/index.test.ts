@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { applyWilayahConfig, extractSqlTitle } from ".";
 
+it.each(["Nama Tabel", "Judul", "Judul Tabel", "nama tabel", "JUDUL TABEL"])("reads the %s metadata alias", (label) => {
+  expect(extractSqlTitle(`/*\n  ${label}: Konsistensi Hortikultura KBLI 02101 - Pengelolaan Hutan\n Creator: Susanto\n*/\nSELECT 1;`, "q_1.sql"))
+    .toBe("Konsistensi Hortikultura KBLI 02101 - Pengelolaan Hutan");
+});
+
+it("supports starred comments and ignores an empty title", () => {
+  expect(extractSqlTitle("/**\n * Judul Tabel: Usaha\n */", "q_1.sql")).toBe("Usaha");
+  expect(extractSqlTitle("/*\nJudul:\nCreator: Susanto\n*/", "q_1.sql")).toBe("q_1");
+});
+
 const sql = `
 /*
 Judul       : Nilai Produksi Konstruksi
