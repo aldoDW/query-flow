@@ -1,17 +1,18 @@
 import "./style.css";
 import { exportFolder } from "../services/excel";
-import { extractSqlTitle } from "../services/sql";
+import { applyWilayahConfig, extractSqlTitle } from "../services/sql";
 
 let folderRunning = false;
 import { loadSnapshot, loadWilayah, saveSnapshot, saveWilayah } from "../services/storage";
 import { groupSqlFiles, isSqlPath } from "../services/repository-sync/files";
 import { addWilayahCode, validateWilayah } from "../services/wilayah";
-import { TARGET, type ExtensionMessage, type RepositorySnapshot, type ScanResult, type SqlFile, type SyncProgress, type WilayahConfig } from "../types";
+import { TARGET, type ExtensionMessage, type RepositorySnapshot, type ScanResult, type SqlFile, type SqlRunProgress, type SyncProgress, type WilayahConfig } from "../types";
 
 let snapshot: RepositorySnapshot | null = null;
 let wilayah: WilayahConfig = { level1: [], level2: [] };
 let progress: SyncProgress = { phase: "idle", message: "Not synced" };
 let wilayahError = "";
+const runProgressTargets = new Map<string, (progress: SqlRunProgress) => void>();
 
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) throw new Error("App container is missing.");
@@ -50,7 +51,7 @@ app.innerHTML = `
         <label>Level 1 <span>/ Provinsi · kosong berarti semua</span></label>
         <div id="level1-list" class="code-list"></div>
         <div id="add-level1-row" class="add-row" hidden>
-          <input id="new-level1" inputmode="numeric" autocomplete="off" placeholder="Kode provinsi" />
+          <input id="new-level1" inputmode="numeric" autocomplete="off" placeholder="kode wilayah (PP)" />
           <button id="confirm-level1" type="button">Tambah</button>
         </div>
         <button id="show-level1-add" class="text-button" type="button">＋ Tambah Provinsi</button>
@@ -59,7 +60,7 @@ app.innerHTML = `
         <label>Level 2 <span>/ Kabupaten/Kota · kosong berarti semua</span></label>
         <div id="level2-list" class="code-list"></div>
         <div id="add-level2-row" class="add-row" hidden>
-          <input id="new-level2" inputmode="numeric" autocomplete="off" placeholder="Kode wilayah" />
+          <input id="new-level2" inputmode="numeric" autocomplete="off" placeholder="kode wilayah (PPKK)" />
           <button id="confirm-level2" type="button">Tambah</button>
         </div>
         <button id="show-level2-add" class="text-button" type="button">＋ Tambah Kabupaten/Kota</button>
@@ -70,10 +71,21 @@ app.innerHTML = `
     </section>
     <section class="section groups-section" aria-labelledby="groups-title">
       <div class="section-heading"><span>03</span><h2 id="groups-title">Folder SQL</h2></div>
+      <details class="run-guide">
+        <summary><span class="help-icon">?</span><span>Panduan Run &amp; auto-loop</span></summary>
+        <div class="run-guide-content">
+          <p>Jika terdapat bug sehingga hasil hanya mencapai 9.000 baris, proses berikutnya berjalan otomatis sampai semua baris terkumpul.</p>
+          <ul>
+            <li>Tombol <strong>Run</strong> berubah menjadi <strong>Stop</strong> selama query berjalan.</li>
+            <li>Editor SQL aktif akan diganti. Tetap buka tab SQL Lab dan side panel ini.</li>
+            <li><strong>Run Folder</strong> membuat Excel hanya jika semua file selesai.</li>
+          </ul>
+        </div>
+      </details>
       <div id="empty-groups" class="empty-state">Import folder SQL untuk melihat daftar query dan menjalankannya di FASIH SQL Lab.</div>
       <div id="groups" class="groups"></div>
     </section>
-    <footer class="author-credit">by D.Agung Sungkono</footer>
+    <footer class="author-credit">initiated by D.Agung Sungkono</footer>
   </main>
   <dialog id="preview-dialog">
     <div class="dialog-header"><div><span id="preview-path"></span><h3 id="preview-name"></h3></div><button id="close-preview" aria-label="Tutup">×</button></div>
@@ -155,6 +167,7 @@ function renderCodeList(
     const input = document.createElement("input");
     input.inputMode = "numeric";
     input.value = code;
+    input.placeholder = label === "Level 1" ? "kode wilayah (PP)" : "kode wilayah (PPKK)";
     input.setAttribute("aria-label", `Kode ${label} ${index + 1}`);
     input.addEventListener("change", () => update(index, input.value));
     const remove = document.createElement("button");
@@ -191,17 +204,50 @@ function renderGroups(): void {
     const batchStatus = document.createElement("p");
     batchStatus.className = "progress";
     batchStatus.setAttribute("role", "status");
+    let batchRunId: string | null = null;
+    let batchTabId: number | null = null;
+    let batchStopRequested = false;
     batch.addEventListener("click", async () => {
-      if (folderRunning) return;
+      if (folderRunning) {
+        if (!batchRunId || batchTabId === null) {
+          batchStatus.textContent = "Run Folder lain masih berjalan.";
+          return;
+        }
+        batchStopRequested = true;
+        batch.disabled = true;
+        batch.textContent = "■ Stopping…";
+        const response = await stopRun(batchRunId, batchTabId);
+        batchStatus.textContent = response.message;
+        if (!response.ok) {
+          batch.disabled = false;
+          batch.textContent = "■ Stop";
+        }
+        return;
+      }
       folderRunning = true;
-      batch.disabled = true;
+      batchStopRequested = false;
+      batch.textContent = "■ Stop";
+      batch.classList.add("stop-button");
       const results: { filename: string; title: string; columns: string[]; rows: unknown[][] }[] = [];
       try {
         const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
         if (tab?.id === undefined) throw new Error("Aktifkan tab FASIH SQL Lab.");
+        batchTabId = tab.id;
         for (const [index, file] of group.files.entries()) {
+          if (batchStopRequested) throw new Error("Run Folder dihentikan oleh pengguna.");
           batchStatus.textContent = `${index + 1}/${group.files.length}: ${file.name} — menunggu hasil. Tetap buka panel dan tab query ini.`;
-          const response = await chrome.runtime.sendMessage({ type: "RUN_SQL_FILE", path: file.path, tabId: tab.id, capture: true } satisfies ExtensionMessage) as { ok: boolean; message: string; columns?: string[]; rows?: unknown[][] };
+          const runId = createRunId();
+          batchRunId = runId;
+          runProgressTargets.set(runId, (runProgress) => {
+            batchStatus.textContent = `${index + 1}/${group.files.length}: ${file.name} — ${formatRunProgress(runProgress)}`;
+          });
+          let response: { ok: boolean; message: string; columns?: string[]; rows?: unknown[][] };
+          try {
+            response = await chrome.runtime.sendMessage({ type: "RUN_SQL_FILE", path: file.path, tabId: tab.id, capture: true, runId } satisfies ExtensionMessage) as typeof response;
+          } finally {
+            runProgressTargets.delete(runId);
+            batchRunId = null;
+          }
           if (!response.ok || !response.columns || !response.rows) throw new Error(`${file.name}: ${response.message}`);
           results.push({ filename: file.name, title: extractSqlTitle(file.content, file.name), columns: response.columns, rows: response.rows });
         }
@@ -211,7 +257,12 @@ function renderGroups(): void {
         batchStatus.textContent = `Batch berhenti; Excel belum dibuat. ${error instanceof Error ? error.message : "Run gagal."}`;
       } finally {
         folderRunning = false;
+        batchRunId = null;
+        batchTabId = null;
+        batchStopRequested = false;
         batch.disabled = false;
+        batch.textContent = "▶ Run Folder → Excel";
+        batch.classList.remove("stop-button");
       }
     });
     files.append(batch, batchStatus);
@@ -222,7 +273,13 @@ function renderGroups(): void {
       button.addEventListener("click", () => showPreview(file.name, file.path, file.content));
       const row = document.createElement("div");
       row.style.display = "grid";
-      row.style.gridTemplateColumns = "minmax(0, 1fr) auto";
+      row.className = "file-row";
+      const actions = document.createElement("div");
+      actions.className = "file-actions";
+      const copy = document.createElement("button");
+      copy.type = "button";
+      copy.textContent = "⧉ Copy";
+      copy.title = "Salin SQL dengan filter wilayah aktif";
       const run = document.createElement("button");
       run.type = "button";
       run.textContent = "▶ Run";
@@ -230,20 +287,55 @@ function renderGroups(): void {
       const status = document.createElement("p");
       status.className = "progress";
       status.setAttribute("role", "status");
-      run.addEventListener("click", async () => {
-        if (folderRunning) { status.textContent = "Tunggu Run Folder selesai."; return; }
-        run.disabled = true;
-        status.textContent = "Mengirim SQL ke editor aktif...";
+      let activeRun: { runId: string; tabId: number } | null = null;
+      copy.addEventListener("click", async () => {
         try {
-          const response = await chrome.runtime.sendMessage({ type: "RUN_SQL_FILE", path: file.path } satisfies ExtensionMessage) as { ok: boolean; message: string };
+          await copyText(applyWilayahConfig(file.content, wilayah));
+          status.textContent = "SQL tersalin ke clipboard.";
+        } catch (error) {
+          status.textContent = error instanceof Error ? error.message : "SQL gagal disalin.";
+        }
+      });
+      run.addEventListener("click", async () => {
+        if (activeRun) {
+          run.disabled = true;
+          run.textContent = "■ Stopping…";
+          const response = await stopRun(activeRun.runId, activeRun.tabId);
+          status.textContent = response.message;
+          if (!response.ok) {
+            run.disabled = false;
+            run.textContent = "■ Stop";
+          }
+          return;
+        }
+        if (folderRunning) { status.textContent = "Tunggu Run Folder selesai."; return; }
+        status.textContent = "Mengirim SQL ke editor aktif...";
+        const runId = createRunId();
+        let tabId: number | undefined;
+        runProgressTargets.set(runId, (runProgress) => {
+          status.textContent = formatRunProgress(runProgress);
+        });
+        try {
+          const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+          if (tab?.id === undefined) throw new Error("Aktifkan tab FASIH SQL Lab.");
+          tabId = tab.id;
+          activeRun = { runId, tabId };
+          run.textContent = "■ Stop";
+          run.classList.add("stop-button");
+          const response = await chrome.runtime.sendMessage({ type: "RUN_SQL_FILE", path: file.path, tabId, runId } satisfies ExtensionMessage) as { ok: boolean; message: string };
           status.textContent = response.message;
         } catch (error) {
           status.textContent = error instanceof Error ? error.message : "Run gagal.";
         } finally {
+          runProgressTargets.delete(runId);
+          activeRun = null;
           run.disabled = false;
+          run.textContent = "▶ Run";
+          run.classList.remove("stop-button");
         }
       });
-      row.append(button, run);
+      actions.append(copy, run);
+      row.append(button, actions);
       files.append(row, status);
     }
     details.append(summary, files);
@@ -304,6 +396,41 @@ function showPreview(name: string, path: string, content: string): void {
 
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat("id-ID", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+}
+
+function createRunId(): string {
+  return crypto.randomUUID();
+}
+
+function formatRunProgress(progress: SqlRunProgress): string {
+  const rows = new Intl.NumberFormat("id-ID").format(progress.rowsCollected);
+  return progress.state === "running"
+    ? `Proses ke-${progress.iteration} sedang berjalan · ${rows} baris terkumpul`
+    : `Proses ke-${progress.iteration} selesai · ${rows} baris terkumpul`;
+}
+
+async function stopRun(runId: string, tabId: number): Promise<{ ok: boolean; message: string }> {
+  try {
+    return await chrome.runtime.sendMessage({ type: "STOP_SQL_RUN", runId, tabId } satisfies ExtensionMessage) as { ok: boolean; message: string };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "Query gagal dihentikan." };
+  }
+}
+
+async function copyText(value: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+  const textArea = document.createElement("textarea");
+  textArea.value = value;
+  textArea.style.position = "fixed";
+  textArea.style.opacity = "0";
+  document.body.append(textArea);
+  textArea.select();
+  const copied = document.execCommand("copy");
+  textArea.remove();
+  if (!copied) throw new Error("SQL gagal disalin ke clipboard.");
 }
 
 // Handler dipertahankan agar fitur GitLab dapat diaktifkan kembali cukup dengan
@@ -380,6 +507,10 @@ async function importRepositoryFolder(fileList: FileList | null): Promise<void> 
 }
 
 chrome.runtime.onMessage.addListener((message: ExtensionMessage) => {
+  if (message.type === "SQL_RUN_PROGRESS") {
+    runProgressTargets.get(message.progress.runId)?.(message.progress);
+    return;
+  }
   if (message.type !== "SYNC_PROGRESS") return;
   progress = message.progress;
   renderSource();

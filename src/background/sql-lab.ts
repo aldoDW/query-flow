@@ -1,5 +1,14 @@
 /** Executes in the page world with automatic top-level ORDER BY injection and 9000-row batching/pagination. */
-export async function runInSqlLabAutoBatch(baseSql: string): Promise<{ ok: boolean; message: string; columns?: string[]; rows?: unknown[][] }> {
+export async function runInSqlLabAutoBatch(baseSql: string, runId: string, path: string): Promise<{ ok: boolean; message: string; columns?: string[]; rows?: unknown[][] }> {
+  const runtimeWindow = window as typeof window & { __queryFlowCancelledRuns?: Record<string, boolean> };
+  runtimeWindow.__queryFlowCancelledRuns ??= {};
+  delete runtimeWindow.__queryFlowCancelledRuns[runId];
+
+  function throwIfCancelled(): void {
+    if (runtimeWindow.__queryFlowCancelledRuns?.[runId]) {
+      throw new Error("Run dihentikan oleh pengguna.");
+    }
+  }
   
   // Helper to check if ORDER BY exists strictly at the top level (depth 0, outside subqueries/CTEs)
   function hasTopLevelOrderBy(sql: string): boolean {
@@ -18,54 +27,32 @@ export async function runInSqlLabAutoBatch(baseSql: string): Promise<{ ok: boole
     return false;
   }
 
-  // Helper function to intelligently ensure a top-level ORDER BY clause exists for safe pagination
+  // Keep an explicit outer ORDER BY. Otherwise use the first output column by
+  // position: guessing an identifier from a CTE/SELECT expression can reference
+  // a column that is not exposed by the outer query.
   function ensureOrderBy(sql: string): string {
     if (hasTopLevelOrderBy(sql)) {
       return sql; // Outer/main query already has a top-level ORDER BY
     }
 
-    let modified = sql.trim().replace(/;$/, "");
-
-    // 1. Check for top-level GROUP BY (depth 0)
-    let depth = 0;
-    let groupByIndex = -1;
-    const upper = modified.toUpperCase();
-    
-    for (let i = 0; i < upper.length - 8; i++) {
-      const char = upper[i];
-      if (char === '(') depth++;
-      else if (char === ')') depth--;
-      else if (depth === 0 && upper.substring(i, i + 8) === 'GROUP BY') {
-        groupByIndex = i;
-        break;
-      }
-    }
-
-    if (groupByIndex !== -1) {
-      const remainder = modified.substring(groupByIndex + 8).trim();
-      // Changed [^\n;]+? to [\s\S]+? so it can read multi-line GROUP BY blocks safely
-      const groupColMatch = remainder.match(/^([\s\S]+?)(?=\bHAVING\b|\bLIMIT\b|\bOFFSET\b|$)/i);
-      if (groupColMatch && groupColMatch[1]) {
-        const groupCols = groupColMatch[1].trim();
-        return `${modified} ORDER BY ${groupCols} ASC`;
-      }
-    }
-
-    // 2. Safe SELECT Scanner: Scan for identifiers containing 'wilayah', 'full_code', or 'kode'
-    // Works reliably even with COALESCE, multi-line formatting, and table aliases (e.g., a.level_1_full_code)
-    const selectMatch = modified.match(/\bSELECT\b([\s\S]*?)\bFROM\b/i);
-    if (selectMatch && selectMatch[1]) {
-      const selectBlock = selectMatch[1];
-      // Find all valid word identifiers inside the SELECT block that match our keywords
-      const matches = [...selectBlock.matchAll(/\b([a-zA-Z0-9_]*(?:wilayah|full_code|kode)[a-zA-Z0-9_]*)\b/gi)];
-      if (matches.length > 0 && matches[0]?.[1]) {
-        const foundCol = matches[0][1];
-        return `${modified} ORDER BY ${foundCol} ASC`;
-      }
-    }
-
-    // 3. Fallback: Sort safely by the first column position at the outer level
+    const modified = sql.trim().replace(/;$/, "");
     return `${modified} ORDER BY 1 ASC`;
+  }
+
+  // Preserve high-precision SQL values before executeScript's structured clone
+  // strips the BigNumber/Decimal prototype and leaves only fields such as c/e/s.
+  function normalizeResultValue(value: unknown): unknown {
+    if (typeof value === "bigint") return value.toString();
+    if (!value || typeof value !== "object") return value;
+
+    const candidate = value as { c?: unknown; e?: unknown; s?: unknown; toString?: () => string };
+    const isHighPrecisionNumber = Array.isArray(candidate.c)
+      && typeof candidate.e === "number"
+      && (candidate.s === 1 || candidate.s === -1);
+    if (!isHighPrecisionNumber || typeof candidate.toString !== "function") return value;
+
+    const rendered = candidate.toString();
+    return rendered === "[object Object]" ? value : rendered;
   }
 
   // Apply the intelligent top-level ORDER BY check before starting pagination loops
@@ -76,13 +63,23 @@ export async function runInSqlLabAutoBatch(baseSql: string): Promise<{ ok: boole
   const limit = 9000;
   const cleanSql = preparedSql.trim().replace(/;$/, "");
 
+  function reportProgress(state: "running" | "completed", iteration: number, rowsCollected: number, batchRows?: number): void {
+    window.postMessage({
+      source: "queryflow-sql-run-progress",
+      progress: { runId, path, iteration, state, rowsCollected, batchRows },
+    }, window.location.origin);
+  }
+
   type Query = { id?: string; sql?: string; state?: string; errorMessage?: string; results?: { columns?: { name: string }[]; data?: Record<string, unknown>[] }; rows?: number };
   type Store = { getState(): { sqlLab?: { queries?: Record<string, Query> } } };
 
   while (true) {
+    const iteration = Math.floor(offset / limit) + 1;
     const paginatedSql = `${cleanSql} LIMIT ${limit} OFFSET ${offset};`;
+    reportProgress("running", iteration, allRows.length);
 
     try {
+      throwIfCancelled();
       let store: Store | undefined;
       for (const node of document.querySelectorAll("#app, #root, #app *")) {
         const key = Object.keys(node).find((key) => key.startsWith("__reactFiber$") || key.startsWith("__reactInternalInstance$"));
@@ -136,6 +133,7 @@ export async function runInSqlLabAutoBatch(baseSql: string): Promise<{ ok: boole
 
       while (Date.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, 300));
+        throwIfCancelled();
         const queries = store.getState().sqlLab?.queries ?? {};
         if (!queryId) {
           const candidates = Object.entries(queries).filter(([id, query]) => !before[id] && query.sql?.trim() === paginatedSql.trim());
@@ -152,7 +150,7 @@ export async function runInSqlLabAutoBatch(baseSql: string): Promise<{ ok: boole
         if (!cols || !Array.isArray(data)) continue;
 
         batchColumns = cols;
-        batchRows = data.map((row) => cols.map((name) => row[name] ?? null));
+        batchRows = data.map((row) => cols.map((name) => normalizeResultValue(row[name] ?? null)));
         break;
       }
 
@@ -163,6 +161,7 @@ export async function runInSqlLabAutoBatch(baseSql: string): Promise<{ ok: boole
       }
 
       allRows = allRows.concat(batchRows);
+      reportProgress("completed", iteration, allRows.length, batchRows.length);
 
       // If results are less than the limit, we've reached the end of the data
       if (batchRows.length < limit) {
@@ -173,14 +172,34 @@ export async function runInSqlLabAutoBatch(baseSql: string): Promise<{ ok: boole
       offset += limit;
 
     } catch (error) {
+      delete runtimeWindow.__queryFlowCancelledRuns?.[runId];
       return { ok: false, message: error instanceof Error ? error.message : "Run gagal." };
     }
   }
 
+  delete runtimeWindow.__queryFlowCancelledRuns?.[runId];
   return {
     ok: true,
     message: `Query selesai dengan total ${allRows.length} baris diambil.`,
     columns,
     rows: allRows
+  };
+}
+
+/** Marks a QueryFlow run as cancelled and presses SQL Lab's visible Stop button when available. */
+export function stopSqlLabRun(runId: string): { ok: true; message: string } {
+  const runtimeWindow = window as typeof window & { __queryFlowCancelledRuns?: Record<string, boolean> };
+  runtimeWindow.__queryFlowCancelledRuns ??= {};
+  runtimeWindow.__queryFlowCancelledRuns[runId] = true;
+
+  const visible = (element: HTMLElement): boolean => element.getClientRects().length > 0;
+  const stopButton = [...document.querySelectorAll<HTMLButtonElement>("button")]
+    .filter(visible)
+    .find((button) => /^stop(?: query)?$/i.test(button.textContent?.trim() ?? ""));
+  stopButton?.click();
+
+  return {
+    ok: true,
+    message: stopButton ? "Menghentikan query aktif…" : "Permintaan stop dikirim…",
   };
 }

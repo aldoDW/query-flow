@@ -146,11 +146,13 @@ Tanggal     : 2026-09-25
 
 ### Run
 
-Klik **Run** di samping satu file. Isi editor aktif diganti dengan salinan SQL yang diparameterisasi, kemudian RUN ditekan. Lihat hasil/error di FASIH; mode ini tidak otomatis mengunduh workbook.
+Klik **Run** di samping satu file. Isi editor aktif diganti dengan salinan SQL yang diparameterisasi, kemudian RUN ditekan. Selama query berjalan tombol berubah menjadi **Stop**. Lihat hasil/error di FASIH; mode ini tidak otomatis mengunduh workbook.
 
 ### Run Folder → Excel
 
-Semua SQL dalam folder dijalankan berurutan. Query berikutnya dimulai setelah query sebelumnya sukses dan hasilnya terbaca. Tetap buka Side Panel; jangan mengganti tab query atau menjalankan query lain selama batch.
+Semua SQL dalam folder dijalankan berurutan. Query berikutnya dimulai setelah query sebelumnya sukses dan hasilnya terbaca. Tombol Run Folder juga berubah menjadi **Stop** selama batch aktif. Tetap buka Side Panel; jangan mengganti tab query atau menjalankan query lain selama batch.
+
+Setiap proses mengambil maksimal 9.000 baris. Jika satu proses menghasilkan tepat 9.000 baris, QueryFlow otomatis menjalankan proses berikutnya dengan `OFFSET` baru sampai proses terakhir menghasilkan kurang dari 9.000 baris. Panel menampilkan **Proses ke-n** dan total baris yang telah terkumpul.
 
 **SQL dalam folder dijalankan berdasarkan natural filename order.** Contoh: `Tabel1.sql`, `Tabel2.sql`, …, `Tabel10.sql`; suffix `1a`, `1b`, `1c`, `1d` tetap berurutan. Snapshot lama juga diurutkan saat dibuka kembali.
 
@@ -160,17 +162,17 @@ Satu folder menghasilkan satu workbook, misalnya `Agregat/Kategori_A` → `Agreg
 
 - Workbook mengikuti path folder tanpa awalan `Hasil_`: `Agregat/Kategori_A` → `Agregat_Kategori_A.xlsx`. Pemisah folder dan karakter khusus diganti underscore sehingga folder Agregat dan Mikro dapat dibedakan.
 - Satu hasil SQL menjadi satu sheet, mengikuti urutan eksekusi.
-- Nama sheet memakai nomor dari segmen terakhir nama file dan judul SQL: `Agregat_1a.sql` dengan metadata `Judul: Jumlah usaha` → `Tabel 1A - Jumlah usaha`. Jika metadata tidak tersedia, bagian judul memakai nama file tanpa `.sql`. Judul lengkap tetap ditulis pada baris 1 meskipun nama sheet dipotong.
+- Nama sheet langsung memakai judul SQL: `Agregat_1a.sql` dengan metadata `Judul: Jumlah usaha` → `Jumlah usaha`. Jika metadata tidak tersedia, nama sheet memakai nama file tanpa `.sql`. Judul lengkap tetap ditulis pada baris 1 meskipun nama sheet dipotong.
 - Nama sheet maksimal 31 karakter; karakter terlarang diganti dan nama duplikat diberi suffix angka.
 - Baris 1: metadata `Judul:` atau fallback nama file, digabung selebar kolom hasil.
 - Baris 2: nama kolom.
 - Baris 3+: data query. Dua baris pertama dibekukan.
 
-Hasil mengikuti **LIMIT** dan batas hasil SQL Lab. QueryFlow tidak mengambil baris tambahan di luar batas tersebut. Data dibaca dari state hasil SQL Lab, bukan hanya baris tabel yang terlihat. Jika jumlah baris yang dilaporkan berbeda dari data tersedia, batch berhenti agar tidak mengekspor hasil yang tidak lengkap.
+Data dibaca dari state hasil SQL Lab, bukan hanya baris tabel yang terlihat. QueryFlow memaginasi hasil per 9.000 baris dan menambahkan `ORDER BY` tingkat terluar bila query belum memilikinya agar urutan antarproses stabil. Ukuran total hasil tetap bergantung pada kapasitas SQL Lab dan memori browser.
 
 ## Jika Eksekusi Gagal
 
-Query berjalan berurutan dengan batas tunggu empat menit per query dalam batch. Jika satu query gagal atau hasil tidak terbaca, folder execution berhenti dan **workbook parsial tidak diunduh**. Timeout extension tidak membatalkan query di server; periksa statusnya di FASIH sebelum mencoba kembali.
+Query berjalan berurutan dengan batas tunggu empat menit per proses. Jika satu query gagal, dihentikan, atau hasil tidak terbaca, folder execution berhenti dan **workbook parsial tidak diunduh**. Tombol Stop mengirim pembatalan ke proses QueryFlow dan menekan Stop pada SQL Lab jika tombolnya tersedia.
 
 1. Identifikasi SQL yang gagal dari pesan panel.
 2. Periksa pilihan database/schema.

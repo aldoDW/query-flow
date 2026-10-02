@@ -1,8 +1,30 @@
 import { saveSnapshot } from "../services/storage";
 import { loadSnapshot, loadWilayah } from "../services/storage";
 import { applyWilayahConfig } from "../services/sql";
-import { runInSqlLabAutoBatch } from "./sql-lab";
+import { runInSqlLabAutoBatch, stopSqlLabRun } from "./sql-lab";
 import { TARGET, type ExtensionMessage, type ScanResult } from "../types";
+
+const activeActionIcons = {
+  16: "icons/queryflow-active-16.png",
+  32: "icons/queryflow-active-32.png",
+};
+
+const idleActionIcons = {
+  16: "icons/queryflow-idle-16.png",
+  32: "icons/queryflow-idle-32.png",
+};
+
+const openedPanelWindows = new Set<number>();
+
+chrome.sidePanel.onOpened?.addListener(({ windowId }) => {
+  openedPanelWindows.add(windowId);
+  void chrome.action.setIcon({ path: activeActionIcons });
+});
+
+chrome.sidePanel.onClosed?.addListener(({ windowId }) => {
+  openedPanelWindows.delete(windowId);
+  if (openedPanelWindows.size === 0) void chrome.action.setIcon({ path: idleActionIcons });
+});
 
 chrome.runtime.onInstalled.addListener(() => {
   void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
@@ -13,6 +35,22 @@ chrome.runtime.onStartup.addListener(() => {
 });
 
 chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) => {
+  if (message.type === "STOP_SQL_RUN") {
+    void (async () => {
+      try {
+        const result = await chrome.scripting.executeScript({
+          target: { tabId: message.tabId },
+          world: "MAIN",
+          func: stopSqlLabRun,
+          args: [message.runId],
+        });
+        sendResponse(result[0]?.result ?? { ok: true, message: "Permintaan stop dikirim…" });
+      } catch (error) {
+        sendResponse({ ok: false, message: error instanceof Error ? error.message : "Query gagal dihentikan." });
+      }
+    })();
+    return true;
+  }
   if (message.type === "RUN_SQL_FILE") {
     void (async () => {
       try {
@@ -31,7 +69,7 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendRe
           target: { tabId: tab.id }, 
           world: "MAIN", 
           func: runInSqlLabAutoBatch, // Automatically handles LIMIT/OFFSET loops if rows == 9000
-          args: [sql], // message.capture is implied/handled inside the auto-batching wrapper
+          args: [sql, message.runId ?? crypto.randomUUID(), file.path], // message.capture is implied/handled inside the auto-batching wrapper
         });
         if (!result[0]?.result) throw new Error("Tidak ada respons dari SQL Lab. Periksa editor dan tombol RUN.");
         sendResponse(result[0].result);
