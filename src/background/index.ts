@@ -1,7 +1,7 @@
 import { saveSnapshot } from "../services/storage";
 import { loadSnapshot, loadWilayah } from "../services/storage";
 import { applyWilayahConfig } from "../services/sql";
-import { runInSqlLab } from "./sql-lab";
+import { runInSqlLabAutoBatch } from "./sql-lab";
 import { TARGET, type ExtensionMessage, type ScanResult } from "../types";
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -28,7 +28,10 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendRe
           throw new Error("Aktifkan tab FASIH SQL Lab (/superset/sqllab/) lalu pilih Run kembali.");
         }
         const result = await chrome.scripting.executeScript({
-          target: { tabId: tab.id }, world: "MAIN", func: runInSqlLab, args: [sql, message.capture ?? false],
+          target: { tabId: tab.id }, 
+          world: "MAIN", 
+          func: runInSqlLabAutoBatch, // Automatically handles LIMIT/OFFSET loops if rows == 9000
+          args: [sql], // message.capture is implied/handled inside the auto-batching wrapper
         });
         if (!result[0]?.result) throw new Error("Tidak ada respons dari SQL Lab. Periksa editor dan tombol RUN.");
         sendResponse(result[0].result);
