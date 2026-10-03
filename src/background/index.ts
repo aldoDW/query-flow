@@ -1,8 +1,30 @@
 import { saveSnapshot } from "../services/storage";
 import { loadSnapshot, loadWilayah } from "../services/storage";
 import { applyWilayahConfig } from "../services/sql";
-import { runInSqlLab } from "./sql-lab";
+import { runInSqlLabChunk, stopSqlLabRun, clearSqlLabRun } from "./sql-lab";
 import { TARGET, type ExtensionMessage, type ScanResult } from "../types";
+
+const activeActionIcons = {
+  16: "icons/queryflow-active-16.png",
+  32: "icons/queryflow-active-32.png",
+};
+
+const idleActionIcons = {
+  16: "icons/queryflow-idle-16.png",
+  32: "icons/queryflow-idle-32.png",
+};
+
+const openedPanelWindows = new Set<number>();
+
+chrome.sidePanel.onOpened?.addListener(({ windowId }) => {
+  openedPanelWindows.add(windowId);
+  void chrome.action.setIcon({ path: activeActionIcons });
+});
+
+chrome.sidePanel.onClosed?.addListener(({ windowId }) => {
+  openedPanelWindows.delete(windowId);
+  if (openedPanelWindows.size === 0) void chrome.action.setIcon({ path: idleActionIcons });
+});
 
 chrome.runtime.onInstalled.addListener(() => {
   void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
@@ -13,6 +35,22 @@ chrome.runtime.onStartup.addListener(() => {
 });
 
 chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) => {
+  if (message.type === "STOP_SQL_RUN" || message.type === "CLEAR_SQL_RUN") {
+    void (async () => {
+      try {
+        const result = await chrome.scripting.executeScript({
+          target: { tabId: message.tabId },
+          world: "MAIN",
+          func: message.type === "STOP_SQL_RUN" ? stopSqlLabRun : clearSqlLabRun,
+          args: [message.runId],
+        });
+        sendResponse(result[0]?.result ?? { ok: true, message: "Permintaan stop dikirim…" });
+      } catch (error) {
+        sendResponse({ ok: false, message: error instanceof Error ? error.message : "Query gagal dihentikan." });
+      }
+    })();
+    return true;
+  }
   if (message.type === "RUN_SQL_FILE") {
     void (async () => {
       try {
@@ -28,7 +66,10 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendRe
           throw new Error("Aktifkan tab FASIH SQL Lab (/superset/sqllab/) lalu pilih Run kembali.");
         }
         const result = await chrome.scripting.executeScript({
-          target: { tabId: tab.id }, world: "MAIN", func: runInSqlLab, args: [sql, message.capture ?? false],
+          target: { tabId: tab.id }, 
+          world: "MAIN", 
+          func: runInSqlLabChunk,
+          args: [sql, message.runId, file.path, message.offset, message.limit, message.iteration],
         });
         if (!result[0]?.result) throw new Error("Tidak ada respons dari SQL Lab. Periksa editor dan tombol RUN.");
         sendResponse(result[0].result);

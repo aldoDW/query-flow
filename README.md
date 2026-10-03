@@ -12,7 +12,7 @@ QueryFlow adalah utilitas yang terintegrasi dengan FASIH, bukan produk atau doku
 
 QueryFlow membantu mengimpor koleksi SQL lokal, menyimpan snapshot, mengatur parameter yang didukung, menjalankan satu query atau seluruh file dalam satu folder secara berurutan, mengumpulkan hasil, dan membuat workbook Excel dengan satu sheet per hasil SQL.
 
-**Satu folder SQL = satu execution group = satu workbook Excel.** File yang langsung berada dalam folder menjadi anggota group; subfolder menjadi group tersendiri.
+**Satu folder SQL = satu execution group; hasil besar dipecah menjadi beberapa workbook Excel.** File yang langsung berada dalam folder menjadi anggota group; subfolder menjadi group tersendiri.
 
 ```text
 Agregat/Kategori_A/
@@ -146,31 +146,39 @@ Tanggal     : 2026-09-25
 
 ### Run
 
-Klik **Run** di samping satu file. Isi editor aktif diganti dengan salinan SQL yang diparameterisasi, kemudian RUN ditekan. Lihat hasil/error di FASIH; mode ini tidak otomatis mengunduh workbook.
+Klik **Run** di samping satu file. Isi editor aktif diganti dengan salinan SQL yang diparameterisasi, kemudian RUN ditekan. Selama query berjalan tombol berubah menjadi **Stop**. Hasil otomatis diunduh ke Excel; Stop mengunduh chunk yang sudah berhasil diterima sebagai hasil parsial.
 
 ### Run Folder → Excel
 
-Semua SQL dalam folder dijalankan berurutan. Query berikutnya dimulai setelah query sebelumnya sukses dan hasilnya terbaca. Tetap buka Side Panel; jangan mengganti tab query atau menjalankan query lain selama batch.
+Semua SQL dalam folder dijalankan berurutan. Query berikutnya dimulai setelah query sebelumnya sukses dan hasilnya terbaca. Tombol Run Folder juga berubah menjadi **Stop** selama batch aktif. Tetap buka Side Panel; jangan mengganti tab query atau menjalankan query lain selama batch.
+
+Ukuran awal chunk adalah 9.000 baris dan otomatis mengecil jika batas ukuran tercapai. QueryFlow menjalankan chunk berikutnya dengan `OFFSET` sesuai jumlah baris yang sudah diterima hingga tidak ada hasil lanjutan. Panel menampilkan **Proses ke-n** dan total baris yang telah terkumpul.
 
 **SQL dalam folder dijalankan berdasarkan natural filename order.** Contoh: `Tabel1.sql`, `Tabel2.sql`, …, `Tabel10.sql`; suffix `1a`, `1b`, `1c`, `1d` tetap berurutan. Snapshot lama juga diurutkan saat dibuka kembali.
 
-Satu folder menghasilkan satu workbook, misalnya `Agregat/Kategori_A` → `Agregat_Kategori_A.xlsx`, diunduh setelah seluruh query berhasil.
+Semua tabel dalam satu folder digabung menjadi satu workbook, misalnya `Agregat/Kategori_A` → `Agregat_Kategori_A.xlsx`. Hanya jika ukuran XLSX akhir melebihi 20 MiB (20 × 1024 × 1024 byte), hasil dipecah menjadi `_part-001.xlsx`, `_part-002.xlsx`, dan seterusnya. Run satu SQL juga mengekspor Excel. Cukup sekali klik Run; chunk berikutnya dijalankan otomatis.
 
 ## Excel Output
 
 - Workbook mengikuti path folder tanpa awalan `Hasil_`: `Agregat/Kategori_A` → `Agregat_Kategori_A.xlsx`. Pemisah folder dan karakter khusus diganti underscore sehingga folder Agregat dan Mikro dapat dibedakan.
 - Satu hasil SQL menjadi satu sheet, mengikuti urutan eksekusi.
-- Nama sheet memakai nomor dari segmen terakhir nama file dan judul SQL: `Agregat_1a.sql` dengan metadata `Judul: Jumlah usaha` → `Tabel 1A - Jumlah usaha`. Jika metadata tidak tersedia, bagian judul memakai nama file tanpa `.sql`. Judul lengkap tetap ditulis pada baris 1 meskipun nama sheet dipotong.
+- Nama sheet langsung memakai judul SQL: `Agregat_1a.sql` dengan metadata `Judul: Jumlah usaha` → `Jumlah usaha`. Jika metadata tidak tersedia, nama sheet memakai nama file tanpa `.sql`. Judul lengkap tetap ditulis pada baris 1 meskipun nama sheet dipotong.
 - Nama sheet maksimal 31 karakter; karakter terlarang diganti dan nama duplikat diberi suffix angka.
 - Baris 1: metadata `Judul:` atau fallback nama file, digabung selebar kolom hasil.
 - Baris 2: nama kolom.
 - Baris 3+: data query. Dua baris pertama dibekukan.
 
-Hasil mengikuti **LIMIT** dan batas hasil SQL Lab. QueryFlow tidak mengambil baris tambahan di luar batas tersebut. Data dibaca dari state hasil SQL Lab, bukan hanya baris tabel yang terlihat. Jika jumlah baris yang dilaporkan berbeda dari data tersedia, batch berhenti agar tidak mengekspor hasil yang tidak lengkap.
+Data dibaca dari state hasil SQL Lab, bukan hanya baris tabel yang terlihat. Setiap permintaan mengambil maksimal 9.000 baris, dengan respons transfer dibatasi sekitar 2 MiB sebelum dikirim ke extension. Offset maju hanya sebanyak baris yang benar-benar diterima. Jika SQL Lab atau transport melaporkan batas ukuran, jumlah baris per permintaan dibagi dua dan offset yang sama dicoba kembali, hingga minimal satu baris. Error lain menghentikan proses dan mengekspor hasil parsial.
+
+Chunk hanya membatasi pengambilan data. Semua chunk dan tabel dikumpulkan sampai selesai, Stop, atau error, lalu ukuran XLSX sesudah kompresi diperiksa. Workbook hanya dipecah jika melampaui 20 MiB; setiap bagian berukuran maksimal 20 MiB dan mengulang judul/header. Jumlah baris, sel, maupun pergantian tabel tidak memicu file terpisah. Unduhan menggunakan izin Chrome `downloads`; nama yang sudah ada mendapat nama unik otomatis.
+
+QueryFlow menambahkan `ORDER BY 1 ASC` bila query belum memiliki ORDER BY tingkat terluar. Untuk pagination yang konsisten, gunakan ORDER BY dengan kunci unik dan sumber data yang tidak berubah selama proses. Kolom pertama yang tidak unik tidak menjamin urutan antarhalaman.
 
 ## Jika Eksekusi Gagal
 
-Query berjalan berurutan dengan batas tunggu empat menit per query dalam batch. Jika satu query gagal atau hasil tidak terbaca, folder execution berhenti dan **workbook parsial tidak diunduh**. Timeout extension tidak membatalkan query di server; periksa statusnya di FASIH sebelum mencoba kembali.
+Query berjalan berurutan dengan batas tunggu empat menit per chunk. Jika satu query gagal atau Stop ditekan, query berikutnya tidak dijalankan. Semua chunk yang sudah diterima tetap diekspor, termasuk query sebelumnya dalam folder dan chunk selesai dari query aktif. Hasil yang terkumpul digabung dan langsung diunduh dengan suffix `_partial.xlsx`, dengan aturan pemecahan 20 MiB yang sama. Jika belum ada hasil, panel menyatakannya tanpa membuat file kosong.
+
+Tombol Stop mengirim pembatalan ke proses QueryFlow dan menekan Stop pada SQL Lab jika tombolnya tersedia. Baris dari chunk yang masih berjalan dan belum menghasilkan respons sukses belum dapat diunduh. Panel menampilkan jumlah baris dan file yang berhasil dikirim ke unduhan Chrome. Jika ekspor Excel sendiri gagal, panel melaporkan kegagalan tersebut.
 
 1. Identifikasi SQL yang gagal dari pesan panel.
 2. Periksa pilihan database/schema.
@@ -188,7 +196,7 @@ Versi ini **tidak mendukung resume**. Query yang sudah sukses pada batch gagal a
 - QueryFlow tidak menyimpan username/password FASIH atau membaca token/cookie secara manual.
 - SQL dieksekusi melalui sesi FASIH SQL Lab yang sudah login; SQL dikirim ke FASIH.
 - Tidak ada AI/LLM, telemetry, atau pengiriman SQL/hasil yang disengaja ke layanan pihak ketiga oleh QueryFlow.
-- Hasil batch ditampung sementara dalam memori panel untuk membuat Excel lokal, bukan disimpan sebagai cache hasil permanen.
+- Hasil ditampung per bagian dalam memori panel untuk membuat Excel lokal, bukan disimpan sebagai cache hasil permanen. Menutup panel sebelum buffer diekspor dapat menghilangkan bagian yang belum diunduh.
 - Menghapus storage/extension menghilangkan state lokal QueryFlow. Excel yang sudah diunduh tetap di lokasi unduhan.
 - Izin host meliputi FASIH dan GitLab BPS; GitLab dipertahankan untuk adapter lama. Tidak ada izin semua situs.
 
@@ -200,7 +208,7 @@ Jangan masukkan kredensial, snapshot pengguna, atau hasil query ke repository. `
 - Belum ada pemilih atau konfigurasi multi-case.
 - Integrasi bergantung pada editor Ace, tombol RUN, dan state React/Redux FASIH/Superset; perubahan dapat memerlukan penyesuaian `src/background/sql-lab.ts`.
 - Tidak ada resume setelah gagal; Side Panel harus tetap terbuka selama batch.
-- Ukuran hasil mengikuti batas SQL Lab dan kapasitas memori browser; snapshot mengikuti kuota `chrome.storage.local`.
+- Satu baris/header yang melebihi batas transfer tidak dapat diambil; hasil sebelumnya tetap diekspor. SQL Lab sendiri masih menyimpan riwayat/state query dan tetap dibatasi kapasitas browser/server; snapshot mengikuti kuota `chrome.storage.local`.
 - Natural order mengurutkan nama file, bukan menganalisis dependensi antar-query.
 
 ## Development

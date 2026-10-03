@@ -53,8 +53,20 @@ export interface SyncProgress {
   total?: number;
 }
 
+export interface SqlRunProgress {
+  runId: string;
+  path: string;
+  iteration: number;
+  state: "running" | "completed";
+  rowsCollected: number;
+  batchRows?: number;
+}
+
 export type ExtensionMessage =
-  | { type: "RUN_SQL_FILE"; path: string; capture?: boolean; tabId?: number }
+  | { type: "RUN_SQL_FILE"; path: string; tabId: number; runId: string; offset: number; limit: number; iteration: number }
+  | { type: "CLEAR_SQL_RUN"; runId: string; tabId: number }
+  | { type: "STOP_SQL_RUN"; runId: string; tabId: number }
+  | { type: "SQL_RUN_PROGRESS"; progress: SqlRunProgress }
   | { type: "SYNC_REPOSITORY" }
   | { type: "SYNC_PROGRESS"; progress: SyncProgress }
   | { type: "GITLAB_SCAN" };
@@ -62,3 +74,7 @@ export type ExtensionMessage =
 export type ScanResult =
   | { ok: true; snapshot: RepositorySnapshot }
   | { ok: false; error: string };
+
+export type SqlChunkResponse =
+  | { ok: true; message: string; columns: string[]; rows: unknown[][]; hasMore: boolean }
+  | { ok: false; message: string };
