@@ -1,12 +1,12 @@
 import "./style.css";
-import { exportFolder } from "../services/excel";
+import { ChunkedExport, collectQuery } from "../services/chunked-export";
 import { applyWilayahConfig, extractSqlTitle } from "../services/sql";
 
 let folderRunning = false;
 import { loadSnapshot, loadWilayah, saveSnapshot, saveWilayah } from "../services/storage";
 import { groupSqlFiles, isSqlPath } from "../services/repository-sync/files";
 import { addWilayahCode, validateWilayah } from "../services/wilayah";
-import { TARGET, type ExtensionMessage, type RepositorySnapshot, type ScanResult, type SqlFile, type SqlRunProgress, type SyncProgress, type WilayahConfig } from "../types";
+import { TARGET, type ExtensionMessage, type RepositorySnapshot, type ScanResult, type SqlFile, type SqlRunProgress, type SqlChunkResponse, type SyncProgress, type WilayahConfig } from "../types";
 
 let snapshot: RepositorySnapshot | null = null;
 let wilayah: WilayahConfig = { level1: [], level2: [] };
@@ -74,11 +74,11 @@ app.innerHTML = `
       <details class="run-guide">
         <summary><span class="help-icon">?</span><span>Panduan Run &amp; auto-loop</span></summary>
         <div class="run-guide-content">
-          <p>Jika terdapat bug sehingga hasil hanya mencapai 9.000 baris, proses berikutnya berjalan otomatis sampai semua baris terkumpul.</p>
+          <p>Sekali Run, data diambil bertahap sampai selesai. Hasil besar otomatis diunduh menjadi beberapa file Excel bernomor.</p>
           <ul>
             <li>Tombol <strong>Run</strong> berubah menjadi <strong>Stop</strong> selama query berjalan.</li>
             <li>Editor SQL aktif akan diganti. Tetap buka tab SQL Lab dan side panel ini.</li>
-            <li><strong>Run Folder</strong> membuat Excel hanya jika semua file selesai.</li>
+            <li><strong>Stop</strong> atau error tetap mengunduh hasil yang sudah terkumpul sebagai Excel parsial.</li>
           </ul>
         </div>
       </details>
@@ -207,6 +207,7 @@ function renderGroups(): void {
     let batchRunId: string | null = null;
     let batchTabId: number | null = null;
     let batchStopRequested = false;
+    let batchController = new AbortController();
     batch.addEventListener("click", async () => {
       if (folderRunning) {
         if (!batchRunId || batchTabId === null) {
@@ -214,21 +215,18 @@ function renderGroups(): void {
           return;
         }
         batchStopRequested = true;
+        batchController.abort();
         batch.disabled = true;
         batch.textContent = "■ Stopping…";
-        const response = await stopRun(batchRunId, batchTabId);
-        batchStatus.textContent = response.message;
-        if (!response.ok) {
-          batch.disabled = false;
-          batch.textContent = "■ Stop";
-        }
+        void stopRun(batchRunId, batchTabId);
         return;
       }
       folderRunning = true;
       batchStopRequested = false;
+      batchController = new AbortController();
       batch.textContent = "■ Stop";
       batch.classList.add("stop-button");
-      const results: { filename: string; title: string; columns: string[]; rows: unknown[][] }[] = [];
+      const output = new ChunkedExport(group.path);
       try {
         const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
         if (tab?.id === undefined) throw new Error("Aktifkan tab FASIH SQL Lab.");
@@ -241,20 +239,26 @@ function renderGroups(): void {
           runProgressTargets.set(runId, (runProgress) => {
             batchStatus.textContent = `${index + 1}/${group.files.length}: ${file.name} — ${formatRunProgress(runProgress)}`;
           });
-          let response: { ok: boolean; message: string; columns?: string[]; rows?: unknown[][] };
+          let pending: Promise<SqlChunkResponse> | undefined;
           try {
-            response = await chrome.runtime.sendMessage({ type: "RUN_SQL_FILE", path: file.path, tabId: tab.id, capture: true, runId } satisfies ExtensionMessage) as typeof response;
+            await collectQuery(
+              (offset, limit, iteration) => pending = chrome.runtime.sendMessage({ type: "RUN_SQL_FILE", path: file.path, tabId: tab.id!, runId, offset, limit, iteration } satisfies ExtensionMessage) as Promise<SqlChunkResponse>,
+              (columns, rows) => output.append({ filename: file.path, title: extractSqlTitle(file.content, file.name), columns, rows }),
+              () => batchStopRequested,
+              (message) => { batchStatus.textContent = message; },
+              batchController.signal,
+            );
           } finally {
             runProgressTargets.delete(runId);
-            batchRunId = null;
+            // Keep cancellation active until the outstanding request settles.
+            void (pending ?? Promise.resolve()).then(() => clearRun(runId, tab.id!), () => clearRun(runId, tab.id!));
+            // Keep the Stop action available between files and while exporting.
           }
-          if (!response.ok || !response.columns || !response.rows) throw new Error(`${file.name}: ${response.message}`);
-          results.push({ filename: file.name, title: extractSqlTitle(file.content, file.name), columns: response.columns, rows: response.rows });
         }
-        await exportFolder(group.path, results);
-        batchStatus.textContent = `Selesai: ${results.length} sheet. Excel diunduh. Hasil mengikuti LIMIT SQL Lab.`;
+        await output.flush(true);
+        batchStatus.textContent = `Selesai: ${output.totalRows.toLocaleString("id-ID")} baris · ${output.parts} file Excel diunduh.`;
       } catch (error) {
-        batchStatus.textContent = `Batch berhenti; Excel belum dibuat. ${error instanceof Error ? error.message : "Run gagal."}`;
+        batchStatus.textContent = await finishPartial(output, error);
       } finally {
         folderRunning = false;
         batchRunId = null;
@@ -283,11 +287,13 @@ function renderGroups(): void {
       const run = document.createElement("button");
       run.type = "button";
       run.textContent = "▶ Run";
-      run.title = "Ganti isi editor SQL Lab aktif dan jalankan SQL asli file ini";
+      run.title = "Jalankan SQL dan unduh Excel otomatis; Stop mengunduh hasil parsial";
       const status = document.createElement("p");
       status.className = "progress";
       status.setAttribute("role", "status");
       let activeRun: { runId: string; tabId: number } | null = null;
+      let stopRequested = false;
+      let controller = new AbortController();
       copy.addEventListener("click", async () => {
         try {
           await copyText(applyWilayahConfig(file.content, wilayah));
@@ -298,20 +304,22 @@ function renderGroups(): void {
       });
       run.addEventListener("click", async () => {
         if (activeRun) {
+          stopRequested = true;
+          controller.abort();
           run.disabled = true;
           run.textContent = "■ Stopping…";
-          const response = await stopRun(activeRun.runId, activeRun.tabId);
-          status.textContent = response.message;
-          if (!response.ok) {
-            run.disabled = false;
-            run.textContent = "■ Stop";
-          }
+          void stopRun(activeRun.runId, activeRun.tabId);
           return;
         }
         if (folderRunning) { status.textContent = "Tunggu Run Folder selesai."; return; }
+        folderRunning = true;
+        stopRequested = false;
+        controller = new AbortController();
+        const output = new ChunkedExport(file.path.replace(/\.sql$/i, ""));
         status.textContent = "Mengirim SQL ke editor aktif...";
         const runId = createRunId();
         let tabId: number | undefined;
+        let pending: Promise<SqlChunkResponse> | undefined;
         runProgressTargets.set(runId, (runProgress) => {
           status.textContent = formatRunProgress(runProgress);
         });
@@ -322,11 +330,22 @@ function renderGroups(): void {
           activeRun = { runId, tabId };
           run.textContent = "■ Stop";
           run.classList.add("stop-button");
-          const response = await chrome.runtime.sendMessage({ type: "RUN_SQL_FILE", path: file.path, tabId, runId } satisfies ExtensionMessage) as { ok: boolean; message: string };
-          status.textContent = response.message;
+          await collectQuery(
+            (offset, limit, iteration) => pending = chrome.runtime.sendMessage({ type: "RUN_SQL_FILE", path: file.path, tabId: tab.id!, runId, offset, limit, iteration } satisfies ExtensionMessage) as Promise<SqlChunkResponse>,
+            (columns, rows) => output.append({ filename: file.path, title: extractSqlTitle(file.content, file.name), columns, rows }),
+            () => stopRequested,
+            (message) => { status.textContent = message; },
+            controller.signal,
+          );
+          await output.flush(true);
+          status.textContent = `Selesai: ${output.totalRows.toLocaleString("id-ID")} baris · ${output.parts} file Excel diunduh.`;
         } catch (error) {
-          status.textContent = error instanceof Error ? error.message : "Run gagal.";
+          status.textContent = await finishPartial(output, error);
         } finally {
+          if (tabId !== undefined) {
+            void (pending ?? Promise.resolve()).then(() => clearRun(runId, tabId!), () => clearRun(runId, tabId!));
+          }
+          folderRunning = false;
           runProgressTargets.delete(runId);
           activeRun = null;
           run.disabled = false;
@@ -407,6 +426,20 @@ function formatRunProgress(progress: SqlRunProgress): string {
   return progress.state === "running"
     ? `Proses ke-${progress.iteration} sedang berjalan · ${rows} baris terkumpul`
     : `Proses ke-${progress.iteration} selesai · ${rows} baris terkumpul`;
+}
+
+async function finishPartial(output: ChunkedExport, error: unknown): Promise<string> {
+  const reason = error instanceof Error ? error.message : "Run gagal.";
+  try {
+    await output.flush(true, true);
+    return `${reason} ${output.parts ? `Hasil parsial: ${output.totalRows.toLocaleString("id-ID")} baris · ${output.parts} file Excel diunduh.` : "Belum ada hasil yang dapat diunduh."}`;
+  } catch (exportError) {
+    return `${reason} Ekspor sisa hasil gagal: ${exportError instanceof Error ? exportError.message : "Error Excel"}. ${output.parts} bagian sebelumnya sudah diunduh.`;
+  }
+}
+
+async function clearRun(runId: string, tabId: number): Promise<void> {
+  await chrome.runtime.sendMessage({ type: "CLEAR_SQL_RUN", runId, tabId } satisfies ExtensionMessage).catch(() => undefined);
 }
 
 async function stopRun(runId: string, tabId: number): Promise<{ ok: boolean; message: string }> {

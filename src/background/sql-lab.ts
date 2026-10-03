@@ -1,8 +1,9 @@
-/** Executes in the page world with automatic top-level ORDER BY injection and 9000-row batching/pagination. */
-export async function runInSqlLabAutoBatch(baseSql: string, runId: string, path: string): Promise<{ ok: boolean; message: string; columns?: string[]; rows?: unknown[][] }> {
+import type { SqlChunkResponse } from "../types";
+
+/** Executes one bounded page in MAIN world. All runtime helpers must remain inside this function. */
+export async function runInSqlLabChunk(baseSql: string, runId: string, path: string, offset: number, limit: number, iteration: number): Promise<SqlChunkResponse> {
   const runtimeWindow = window as typeof window & { __queryFlowCancelledRuns?: Record<string, boolean> };
   runtimeWindow.__queryFlowCancelledRuns ??= {};
-  delete runtimeWindow.__queryFlowCancelledRuns[runId];
 
   function throwIfCancelled(): void {
     if (runtimeWindow.__queryFlowCancelledRuns?.[runId]) {
@@ -57,10 +58,6 @@ export async function runInSqlLabAutoBatch(baseSql: string, runId: string, path:
 
   // Apply the intelligent top-level ORDER BY check before starting pagination loops
   const preparedSql = ensureOrderBy(baseSql);
-  let allRows: unknown[][] = [];
-  let columns: string[] = [];
-  let offset = 0;
-  const limit = 9000;
   const cleanSql = preparedSql.trim().replace(/;$/, "");
 
   function reportProgress(state: "running" | "completed", iteration: number, rowsCollected: number, batchRows?: number): void {
@@ -73,10 +70,9 @@ export async function runInSqlLabAutoBatch(baseSql: string, runId: string, path:
   type Query = { id?: string; sql?: string; state?: string; errorMessage?: string; results?: { columns?: { name: string }[]; data?: Record<string, unknown>[] }; rows?: number };
   type Store = { getState(): { sqlLab?: { queries?: Record<string, Query> } } };
 
-  while (true) {
-    const iteration = Math.floor(offset / limit) + 1;
+  {
     const paginatedSql = `${cleanSql} LIMIT ${limit} OFFSET ${offset};`;
-    reportProgress("running", iteration, allRows.length);
+    reportProgress("running", iteration, offset);
 
     try {
       throwIfCancelled();
@@ -124,16 +120,18 @@ export async function runInSqlLabAutoBatch(baseSql: string, runId: string, path:
         .filter(visible).filter((button) => /^run(?: query)?$/i.test(button.textContent?.trim() ?? ""));
       if (run.length !== 1 || !run[0] || run[0].disabled) throw new Error("RUN belum siap.");
       
+      throwIfCancelled();
       run[0].click();
 
       const deadline = Date.now() + 240_000;
       let queryId: string | undefined;
       let batchColumns: string[] = [];
-      let batchRows: unknown[][] = [];
+      const batchRows: unknown[][] = [];
+      let complete = false;
+      let hasMore = false;
 
       while (Date.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, 300));
-        throwIfCancelled();
         const queries = store.getState().sqlLab?.queries ?? {};
         if (!queryId) {
           const candidates = Object.entries(queries).filter(([id, query]) => !before[id] && query.sql?.trim() === paginatedSql.trim());
@@ -141,49 +139,59 @@ export async function runInSqlLabAutoBatch(baseSql: string, runId: string, path:
         }
 
         const query = queryId ? queries[queryId] : undefined;
+        if (!query || query.state !== "success") throwIfCancelled();
         if (!query) continue;
         if (["failed", "stopped", "timed_out"].includes(query.state ?? "")) throw new Error(query.errorMessage ?? `Query ${query.state}`);
         if (query.state !== "success") continue;
 
         const cols = query.results?.columns?.map((column) => column.name);
         const data = query.results?.data;
-        if (!cols || !Array.isArray(data)) continue;
+        if (!cols || !Array.isArray(data)) {
+          throwIfCancelled();
+          continue;
+        }
 
         batchColumns = cols;
-        batchRows = data.map((row) => cols.map((name) => normalizeResultValue(row[name] ?? null)));
+        // Bound the response before executeScript/Chrome messaging serializes it.
+        // A wide result may yield fewer rows than the SQL LIMIT; resume at the
+        // number actually delivered, never at the requested LIMIT.
+        const encoder = new TextEncoder();
+        const maxBytes = 2 * 1024 * 1024;
+        let bytes = encoder.encode(JSON.stringify(cols)).byteLength + 4096;
+        if (bytes >= maxBytes) throw new Error("Header hasil melebihi batas transfer 2 MiB.");
+        for (const row of data) {
+          const values = cols.map((name) => normalizeResultValue(row[name] ?? null));
+          const rowBytes = encoder.encode(JSON.stringify(values)).byteLength + 1;
+          if (bytes + rowBytes > maxBytes) {
+            if (batchRows.length === 0) throw new Error("Satu baris melebihi batas transfer 2 MiB.");
+            break;
+          }
+          batchRows.push(values);
+          bytes += rowBytes;
+        }
+        hasMore = batchRows.length < data.length || data.length >= limit;
+        complete = true;
         break;
       }
 
-      if (!queryId) throw new Error("Batas tunggu 4 menit tercapai atau query tidak terpantau.");
-
-      if (columns.length === 0) {
-        columns = batchColumns;
+      if (!complete) {
+        const stopButton = [...document.querySelectorAll<HTMLButtonElement>("button")]
+          .find((button) => button.getClientRects().length > 0 && /^stop(?: query)?$/i.test(button.textContent?.trim() ?? ""));
+        stopButton?.click();
+        throw new Error("Batas tunggu 4 menit tercapai; hasil chunk belum tersedia.");
       }
-
-      allRows = allRows.concat(batchRows);
-      reportProgress("completed", iteration, allRows.length, batchRows.length);
-
-      // If results are less than the limit, we've reached the end of the data
-      if (batchRows.length < limit) {
-        break;
-      }
-
-      // Increment offset for the next batch loop
-      offset += limit;
-
+      reportProgress("completed", iteration, offset + batchRows.length, batchRows.length);
+      return { ok: true, message: "Chunk diterima.", columns: batchColumns, rows: batchRows, hasMore };
     } catch (error) {
-      delete runtimeWindow.__queryFlowCancelledRuns?.[runId];
       return { ok: false, message: error instanceof Error ? error.message : "Run gagal." };
     }
   }
+}
 
+/** Release cancellation state after the panel has finished exporting a run. */
+export function clearSqlLabRun(runId: string): void {
+  const runtimeWindow = window as typeof window & { __queryFlowCancelledRuns?: Record<string, boolean> };
   delete runtimeWindow.__queryFlowCancelledRuns?.[runId];
-  return {
-    ok: true,
-    message: `Query selesai dengan total ${allRows.length} baris diambil.`,
-    columns,
-    rows: allRows
-  };
 }
 
 /** Marks a QueryFlow run as cancelled and presses SQL Lab's visible Stop button when available. */

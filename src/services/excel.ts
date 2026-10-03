@@ -85,13 +85,20 @@ export function workbookFilename(path: string): string {
   return `${folder.replace(/[^a-z0-9_-]/gi, "_")}.xlsx`;
 }
 
-export async function exportFolder(path: string, results: QueryResult[]): Promise<void> {
+export async function serializeWorkbook(results: QueryResult[]): Promise<Uint8Array> {
   const workbook = buildWorkbook(results);
-  const buffer = await workbook.xlsx.writeBuffer();
+  return new Uint8Array(await workbook.xlsx.writeBuffer());
+}
+
+export async function exportFolder(path: string, results: QueryResult[]): Promise<void> {
+  await downloadWorkbook(path, await serializeWorkbook(results));
+}
+
+export async function downloadWorkbook(path: string, buffer: Uint8Array): Promise<void> {
   const url = URL.createObjectURL(new Blob([new Uint8Array(buffer)], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = workbookFilename(path);
-  link.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  try {
+    await chrome.downloads.download({ url, filename: workbookFilename(path), saveAs: false, conflictAction: "uniquify" });
+  } finally {
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  }
 }

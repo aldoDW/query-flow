@@ -1,5 +1,5 @@
-import { expect, it } from "vitest";
-import { bigNumberPartsToDecimal, buildWorkbook, sheetName } from "./excel";
+import { afterEach, expect, it, vi } from "vitest";
+import { bigNumberPartsToDecimal, buildWorkbook, sheetName, exportFolder } from "./excel";
 
 it("uses the SQL title directly as the sheet name", () => {
   expect(sheetName("Agregat_1a.sql", [], "Jumlah Usaha")).toBe("Jumlah Usaha");
@@ -44,4 +44,18 @@ it("converts serialized high-precision numbers instead of writing JSON", () => {
     rows: [[{ c: [1592650473717], e: 13, s: 1 }]],
   }]);
   expect(workbook.worksheets[0]?.getCell("A3").value).toBe("15926504737170");
+});
+
+
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+it("uses Chrome downloads for automatic parts and reports download rejection", async () => {
+  const download = vi.fn().mockResolvedValueOnce(123).mockRejectedValueOnce(new Error("Download rejected"));
+  vi.stubGlobal("chrome", { downloads: { download } });
+  vi.stubGlobal("window", { setTimeout: vi.fn() });
+  vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:test");
+  const results = [{ filename: "a.sql", title: "A", columns: ["id"], rows: [[1]] }];
+  await exportFolder("folder_part-001", results);
+  expect(download).toHaveBeenCalledWith({ url: "blob:test", filename: "folder_part-001.xlsx", saveAs: false, conflictAction: "uniquify" });
+  await expect(exportFolder("folder_partial", results)).rejects.toThrow("Download rejected");
 });

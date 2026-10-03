@@ -1,7 +1,7 @@
 import { saveSnapshot } from "../services/storage";
 import { loadSnapshot, loadWilayah } from "../services/storage";
 import { applyWilayahConfig } from "../services/sql";
-import { runInSqlLabAutoBatch, stopSqlLabRun } from "./sql-lab";
+import { runInSqlLabChunk, stopSqlLabRun, clearSqlLabRun } from "./sql-lab";
 import { TARGET, type ExtensionMessage, type ScanResult } from "../types";
 
 const activeActionIcons = {
@@ -35,13 +35,13 @@ chrome.runtime.onStartup.addListener(() => {
 });
 
 chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) => {
-  if (message.type === "STOP_SQL_RUN") {
+  if (message.type === "STOP_SQL_RUN" || message.type === "CLEAR_SQL_RUN") {
     void (async () => {
       try {
         const result = await chrome.scripting.executeScript({
           target: { tabId: message.tabId },
           world: "MAIN",
-          func: stopSqlLabRun,
+          func: message.type === "STOP_SQL_RUN" ? stopSqlLabRun : clearSqlLabRun,
           args: [message.runId],
         });
         sendResponse(result[0]?.result ?? { ok: true, message: "Permintaan stop dikirim…" });
@@ -68,8 +68,8 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendRe
         const result = await chrome.scripting.executeScript({
           target: { tabId: tab.id }, 
           world: "MAIN", 
-          func: runInSqlLabAutoBatch, // Automatically handles LIMIT/OFFSET loops if rows == 9000
-          args: [sql, message.runId ?? crypto.randomUUID(), file.path], // message.capture is implied/handled inside the auto-batching wrapper
+          func: runInSqlLabChunk,
+          args: [sql, message.runId, file.path, message.offset, message.limit, message.iteration],
         });
         if (!result[0]?.result) throw new Error("Tidak ada respons dari SQL Lab. Periksa editor dan tombol RUN.");
         sendResponse(result[0].result);
