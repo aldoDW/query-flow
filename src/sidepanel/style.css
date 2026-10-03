@@ -74,6 +74,99 @@ input:focus { border-color: #39745a; box-shadow: 0 0 0 3px rgba(57,116,90,.12); 
 .file-actions button { flex: none; }
 .file-list .stop-button { color: #a0392f; background: #f7e9e6; font-weight: 750; }
 .file-list .stop-button:hover { color: #842e27; background: #f1d9d5; }
+.folder-config-box {
+  margin: 6px 0 10px;
+  padding: 10px;
+  border: 1px solid #d5ddd5;
+  border-radius: 8px;
+  background: rgba(246, 248, 245, 0.85);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+.config-row-group {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.config-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.config-field label {
+  margin: 0;
+  color: #65756d;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.config-field input {
+  padding: 5px 8px;
+  font-size: 11px;
+  border-radius: 5px;
+  background: #fff;
+}
+.config-selection-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed #d5ded6;
+}
+.selection-badge {
+  color: #295f48;
+  background: #e2ede4;
+  padding: 2px 7px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 700;
+}
+.selection-actions {
+  display: flex;
+  gap: 4px;
+}
+.micro-btn {
+  padding: 3px 7px !important;
+  border: 1px solid #c2cdc3 !important;
+  border-radius: 4px !important;
+  color: #43544b !important;
+  background: #ffffff !important;
+  font-size: 10px !important;
+  font-weight: 600 !important;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.micro-btn:hover {
+  border-color: #39745a !important;
+  color: #295f48 !important;
+  background: #eef4f0 !important;
+}
+.file-check-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+.file-select-check {
+  width: 15px;
+  height: 15px;
+  margin: 0 0 0 2px;
+  accent-color: #295f48;
+  cursor: pointer;
+  flex: none;
+}
+.file-row.is-unselected {
+  opacity: 0.55;
+}
+.file-row.is-unselected:hover {
+  opacity: 0.85;
+}
+.progress-warning {
+  color: #b45309;
+}
 dialog { width: calc(100vw - 24px); max-width: 700px; height: calc(100vh - 40px); padding: 0; border: 1px solid #aebbb2; border-radius: 10px; color: #e5ebe7; background: #17201c; }
 dialog::backdrop { background: rgba(22,29,25,.45); }
 .dialog-header { display: flex; align-items: start; justify-content: space-between; gap: 12px; padding: 14px; border-bottom: 1px solid #344239; }
