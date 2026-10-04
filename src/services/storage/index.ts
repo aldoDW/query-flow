@@ -55,6 +55,7 @@ export const FOLDER_CONFIGS_KEY = "folderConfigs";
 
 export interface StoredFolderConfig {
   selectedPaths?: string[];
+  advancedSettings?: boolean;
   startRow?: number;
   maxRows?: number;
   checkpointRows?: number;

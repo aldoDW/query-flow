@@ -199,11 +199,17 @@ function renderGroups(): void {
         ? currentConfig.selectedPaths.filter((path) => allPaths.includes(path))
         : allPaths
     );
-    let startRow = typeof currentConfig.startRow === "number" && currentConfig.startRow >= 1 ? currentConfig.startRow : 1;
-    let maxRows = typeof currentConfig.maxRows === "number" && currentConfig.maxRows > 0 ? currentConfig.maxRows : undefined;
-    let checkpointRows = typeof currentConfig.checkpointRows === "number" && currentConfig.checkpointRows > 0
+    const configuredStartRow = typeof currentConfig.startRow === "number" && currentConfig.startRow >= 1 ? currentConfig.startRow : 1;
+    const configuredMaxRows = typeof currentConfig.maxRows === "number" && currentConfig.maxRows > 0 ? currentConfig.maxRows : undefined;
+    const configuredCheckpointRows = typeof currentConfig.checkpointRows === "number" && currentConfig.checkpointRows > 0
       ? Math.floor(currentConfig.checkpointRows)
       : EXPORT_CHECKPOINT_ROWS;
+    let advancedSettings = typeof currentConfig.advancedSettings === "boolean"
+      ? currentConfig.advancedSettings
+      : configuredStartRow !== 1 || configuredMaxRows !== undefined || configuredCheckpointRows !== EXPORT_CHECKPOINT_ROWS;
+    let startRow = advancedSettings ? configuredStartRow : 1;
+    let maxRows = advancedSettings ? configuredMaxRows : undefined;
+    let checkpointRows = advancedSettings ? configuredCheckpointRows : EXPORT_CHECKPOINT_ROWS;
 
     const details = document.createElement("details");
     details.className = "group";
@@ -223,6 +229,15 @@ function renderGroups(): void {
     // Folder Options: Start Row & Max Rows, Query Selection
     const configBox = document.createElement("div");
     configBox.className = "folder-config-box";
+
+    const advancedSettingsLabel = document.createElement("label");
+    advancedSettingsLabel.className = "advanced-settings-toggle";
+    const advancedSettingsInput = document.createElement("input");
+    advancedSettingsInput.type = "checkbox";
+    advancedSettingsInput.checked = advancedSettings;
+    const advancedSettingsText = document.createElement("span");
+    advancedSettingsText.textContent = "Advanced settings";
+    advancedSettingsLabel.append(advancedSettingsInput, advancedSettingsText);
 
     const rowGroup = document.createElement("div");
     rowGroup.className = "config-row-group";
@@ -283,7 +298,7 @@ function renderGroups(): void {
     selectionActions.append(selectAllBtn, deselectAllBtn);
 
     toolbar.append(selectionBadge, selectionActions);
-    configBox.append(rowGroup, toolbar);
+    configBox.append(advancedSettingsLabel, rowGroup, toolbar);
 
     const batch = document.createElement("button");
     batch.className = "secondary-button";
@@ -296,6 +311,7 @@ function renderGroups(): void {
     const persistCurrentFolderConfig = async (): Promise<void> => {
       folderConfigs[group.path] = {
         selectedPaths: [...selectedPaths],
+        advancedSettings,
         startRow,
         maxRows,
         checkpointRows,
@@ -308,6 +324,15 @@ function renderGroups(): void {
         }
       }
     };
+
+    const updateAdvancedSettingsState = (): void => {
+      startRowInput.disabled = !advancedSettings;
+      maxRowsInput.disabled = !advancedSettings;
+      checkpointRowsInput.disabled = !advancedSettings;
+      rowGroup.classList.toggle("is-disabled", !advancedSettings);
+    };
+
+    updateAdvancedSettingsState();
 
     const updateSelectionDisplay = (): void => {
       const count = selectedPaths.size;
@@ -334,6 +359,20 @@ function renderGroups(): void {
       const val = parseInt(checkpointRowsInput.value, 10);
       checkpointRows = !isNaN(val) && val > 0 ? val : EXPORT_CHECKPOINT_ROWS;
       checkpointRowsInput.value = String(checkpointRows);
+      void persistCurrentFolderConfig();
+    });
+
+    advancedSettingsInput.addEventListener("change", () => {
+      advancedSettings = advancedSettingsInput.checked;
+      if (!advancedSettings) {
+        startRow = 1;
+        maxRows = undefined;
+        checkpointRows = EXPORT_CHECKPOINT_ROWS;
+        startRowInput.value = String(startRow);
+        maxRowsInput.value = "";
+        checkpointRowsInput.value = String(checkpointRows);
+      }
+      updateAdvancedSettingsState();
       void persistCurrentFolderConfig();
     });
 
