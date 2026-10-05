@@ -269,7 +269,7 @@ function renderGroups(): void {
     const checkpointRowsField = document.createElement("div");
     checkpointRowsField.className = "config-field";
     const checkpointRowsLabel = document.createElement("label");
-    checkpointRowsLabel.textContent = "Download Tiap Baris";
+    checkpointRowsLabel.textContent = "Download Excel Tiap X Baris";
     const checkpointRowsInput = document.createElement("input");
     checkpointRowsInput.type = "number";
     checkpointRowsInput.min = "1";
