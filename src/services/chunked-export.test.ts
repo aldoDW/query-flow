@@ -4,7 +4,15 @@ import { serializeWorkbook, type QueryResult } from "./excel";
 import type { SqlChunkResponse } from "../types";
 
 const result = (rows: unknown[][], filename = "a.sql"): QueryResult => ({ filename, title: filename, columns: ["id"], rows });
-const chunk = (rows: unknown[][], hasMore = false): SqlChunkResponse => ({ ok: true, message: "OK", columns: ["id"], rows, hasMore });
+const chunk = (rows: unknown[][], hasMore = false, continuation = false, pageSize?: number): SqlChunkResponse => ({
+  ok: true,
+  message: "OK",
+  columns: ["id"],
+  rows,
+  hasMore,
+  continuation,
+  ...(pageSize === undefined ? {} : { pageSize }),
+});
 
 function downloads() {
   const saved: { path: string; results: QueryResult[] }[] = [];
@@ -72,6 +80,20 @@ describe("combined Excel output", () => {
     expect(saved.map((part) => part.path)).toEqual(["folder"]);
   });
 
+  it("writes incremental checkpoints as numbered parts and releases completed rows", async () => {
+    const { saved, download, serialize } = downloads();
+    const output = new ChunkedExport("folder", download, undefined, serialize, 2);
+    await output.append(result([[1]]));
+    expect(download).not.toHaveBeenCalled();
+    await output.append(result([[2]]));
+    expect(saved).toEqual([{ path: "folder_part-001", results: [result([[1], [2]])] }]);
+    await output.append(result([[3]]));
+    await output.flush(true);
+    expect(saved[1]).toEqual({ path: "folder_part-002", results: [result([[3]])] });
+    expect(output.totalRows).toBe(3);
+    expect(serialize).toHaveBeenCalledTimes(2);
+  });
+
   it("exports prior tables plus the current partial table together", async () => {
     const { saved, download, serialize } = downloads();
     const output = new ChunkedExport("folder", download, undefined, serialize);
@@ -114,15 +136,35 @@ describe("automatic chunk collection", () => {
     expect(output.totalRows).toBe(2);
   });
 
-  it("shrinks oversized requests at the same offset and advances by actual delivered rows", async () => {
+  it("keeps a 9000-row SQL page offset fixed while transferring it in multiple messages", async () => {
     const request = vi.fn<(...args: number[]) => Promise<SqlChunkResponse>>()
-      .mockResolvedValueOnce(chunk([[1], [2]], true))
-      .mockResolvedValueOnce({ ok: false, message: "Response exceeded 64 MB" })
-      .mockResolvedValueOnce(chunk([[3]], true))
-      .mockResolvedValueOnce(chunk([]));
+      .mockResolvedValueOnce(chunk([[1], [2]], true, true, 9000))
+      .mockResolvedValueOnce(chunk([[3], [4]], true, false, 9000))
+      .mockResolvedValueOnce(chunk([], false, false, 9000));
     const accept = vi.fn(async () => {});
     await collectQuery(request, accept, () => false, vi.fn());
-    expect(request.mock.calls).toEqual([[0, 9000, 1], [2, 2, 2], [2, 1, 2], [3, 1, 3]]);
+    expect(request.mock.calls).toEqual([[0, 9000, 1], [0, 9000, 2], [9000, 9000, 3]]);
+    expect(accept).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries a failed SQL request at the same offset with a smaller query page", async () => {
+    const request = vi.fn<(...args: number[]) => Promise<SqlChunkResponse>>()
+      .mockResolvedValueOnce({ ok: false, message: "Response exceeded 64 MB" })
+      .mockResolvedValueOnce(chunk([[1]], true, false, 4500))
+      .mockResolvedValueOnce(chunk([[2]], false, false, 9000));
+    await collectQuery(request, vi.fn(async () => {}), () => false, vi.fn());
+    expect(request.mock.calls).toEqual([[0, 9000, 1], [0, 4500, 1], [4500, 9000, 2]]);
+  });
+
+  it("starts at the configured row and stops at the configured total row count", async () => {
+    const request = vi.fn<(...args: number[]) => Promise<SqlChunkResponse>>()
+      .mockResolvedValueOnce(chunk([[5], [6]], true, true, 3))
+      .mockResolvedValueOnce(chunk([[7]], true, false, 3));
+    const accept = vi.fn(async () => {});
+
+    await collectQuery(request, accept, () => false, vi.fn(), undefined, { startRow: 5, maxRows: 3 });
+
+    expect(request.mock.calls).toEqual([[4, 3, 1], [4, 3, 2]]);
     expect(accept).toHaveBeenCalledTimes(2);
   });
 

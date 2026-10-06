@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { bigNumberPartsToDecimal, buildWorkbook, sheetName, exportFolder } from "./excel";
+import { workbookFilename } from "./excel";
 
 it("uses the SQL title directly as the sheet name", () => {
   expect(sheetName("Agregat_1a.sql", [], "Jumlah Usaha")).toBe("Jumlah Usaha");
@@ -58,4 +59,9 @@ it("uses Chrome downloads for automatic parts and reports download rejection", a
   await exportFolder("folder_part-001", results);
   expect(download).toHaveBeenCalledWith({ url: "blob:test", filename: "folder_part-001.xlsx", saveAs: false, conflictAction: "uniquify" });
   await expect(exportFolder("folder_partial", results)).rejects.toThrow("Download rejected");
+});
+
+it("generates correct workbook filenames for standard and partial exports", () => {
+  expect(workbookFilename("Agregat/Kategori_A")).toBe("Agregat_Kategori_A.xlsx");
+  expect(workbookFilename("Agregat/Kategori_A", true)).toBe("Agregat_Kategori_A_partial.xlsx");
 });
