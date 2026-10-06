@@ -1,4 +1,5 @@
 import "./style.css";
+import packageJson from "../../package.json";
 import { ChunkedExport, collectQuery, EXPORT_CHECKPOINT_ROWS } from "../services/chunked-export";
 import { applyWilayahConfig, extractSqlTitle } from "../services/sql";
 
@@ -25,7 +26,10 @@ if (!app) throw new Error("App container is missing.");
 app.innerHTML = `
   <main class="panel">
     <header class="app-header">
-      <span class="eyebrow">Chrome Extension</span>
+      <div class="app-brandline">
+        <span class="eyebrow">Chrome Extension</span>
+        <span class="version-badge">v${packageJson.version}</span>
+      </div>
       <h1>QueryFlow</h1>
       <p class="field-note">Integrasi · FASIH SQL Lab</p>
       <p class="field-note">Case 1 · SE2026 — Sensus Ekonomi 2026</p>
@@ -92,7 +96,7 @@ app.innerHTML = `
       <div id="empty-groups" class="empty-state">Import folder SQL untuk melihat daftar query dan menjalankannya di FASIH SQL Lab.</div>
       <div id="groups" class="groups"></div>
     </section>
-    <footer class="author-credit">initiated by D.Agung Sungkono</footer>
+    <footer class="author-credit">Initiated by D. Agung Sungkono</footer>
   </main>
   <dialog id="preview-dialog">
     <div class="dialog-header"><div><span id="preview-path"></span><h3 id="preview-name"></h3></div><button id="close-preview" aria-label="Tutup">×</button></div>
