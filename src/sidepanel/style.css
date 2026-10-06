@@ -77,73 +77,82 @@ input:focus { border-color: #39745a; box-shadow: 0 0 0 3px rgba(57,116,90,.12); 
 .file-list .stop-button { color: #a0392f; background: #f7e9e6; font-weight: 750; }
 .file-list .stop-button:hover { color: #842e27; background: #f1d9d5; }
 .folder-config-box {
-  margin: 6px 0 10px;
-  padding: 10px;
+  margin: 5px 0 8px;
+  padding: 8px;
   border: 1px solid #d5ddd5;
   border-radius: 8px;
   background: rgba(246, 248, 245, 0.85);
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.03);
 }
 .advanced-settings-toggle {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   width: fit-content;
-  margin: 0 0 8px;
-  color: #42534b;
+  margin: 0 0 6px;
+  color: #53645b;
   font-size: 11px;
+  font-weight: 700;
   cursor: pointer;
 }
 .advanced-settings-toggle input {
-  width: 15px;
-  height: 15px;
+  width: 14px;
+  height: 14px;
   margin: 0;
   accent-color: #295f48;
 }
 .config-row-group {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  margin-bottom: 8px;
+  align-items: end;
+  gap: 6px;
+  margin-bottom: 7px;
 }
 .config-row-group.is-disabled { opacity: 0.55; }
 .config-field {
   display: flex;
   flex-direction: column;
   gap: 3px;
+  min-width: 0;
 }
 .config-field label {
+  display: flex;
+  align-items: flex-end;
+  min-height: 2.2em;
   margin: 0;
-  color: #65756d;
-  font-size: 9.5px;
+  color: #596b61;
+  font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+  line-height: 1.15;
 }
 .config-field input {
-  padding: 5px 8px;
-  font-size: 11px;
+  min-height: 29px;
+  padding: 4px 7px;
+  border-color: #c3cec5;
   border-radius: 5px;
   background: #fff;
+  font-size: 11px;
 }
 .config-selection-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px;
   padding-top: 6px;
   border-top: 1px dashed #d5ded6;
 }
 .selection-badge {
   color: #295f48;
   background: #e2ede4;
-  padding: 2px 7px;
-  border-radius: 10px;
-  font-size: 10px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  font-size: 9px;
   font-weight: 700;
+  white-space: nowrap;
 }
 .selection-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
 }
 .micro-btn {
@@ -152,8 +161,8 @@ input:focus { border-color: #39745a; box-shadow: 0 0 0 3px rgba(57,116,90,.12); 
   border-radius: 4px !important;
   color: #43544b !important;
   background: #ffffff !important;
-  font-size: 10px !important;
-  font-weight: 600 !important;
+  font-size: 9px !important;
+  font-weight: 650 !important;
   cursor: pointer;
   transition: all 0.15s ease;
 }

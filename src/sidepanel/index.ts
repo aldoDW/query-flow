@@ -55,7 +55,6 @@ app.innerHTML = `
     </section>
     <section class="section" aria-labelledby="wilayah-title">
       <div class="section-heading"><span>02</span><h2 id="wilayah-title">Filter Wilayah</h2></div>
-      <p class="field-note">Case 1 · SE2026. Berlaku pada SQL dengan parameter filter_provinsi dan filter_kabupaten.</p>
       <div class="field">
         <label>Level 1 <span>/ Provinsi · kosong berarti semua</span></label>
         <div id="level1-list" class="code-list"></div>
@@ -249,7 +248,7 @@ function renderGroups(): void {
     const startRowField = document.createElement("div");
     startRowField.className = "config-field";
     const startRowLabel = document.createElement("label");
-    startRowLabel.textContent = "Mulai Baris";
+    startRowLabel.textContent = "Mulai baris";
     const startRowInput = document.createElement("input");
     startRowInput.type = "number";
     startRowInput.min = "1";
@@ -261,7 +260,7 @@ function renderGroups(): void {
     const maxRowsField = document.createElement("div");
     maxRowsField.className = "config-field";
     const maxRowsLabel = document.createElement("label");
-    maxRowsLabel.textContent = "Maks Total Baris";
+    maxRowsLabel.textContent = "Batas baris";
     const maxRowsInput = document.createElement("input");
     maxRowsInput.type = "number";
     maxRowsInput.min = "1";
@@ -273,7 +272,7 @@ function renderGroups(): void {
     const checkpointRowsField = document.createElement("div");
     checkpointRowsField.className = "config-field";
     const checkpointRowsLabel = document.createElement("label");
-    checkpointRowsLabel.textContent = "Download Excel Tiap X Baris";
+    checkpointRowsLabel.textContent = "Unduh tiap X baris";
     const checkpointRowsInput = document.createElement("input");
     checkpointRowsInput.type = "number";
     checkpointRowsInput.min = "1";
