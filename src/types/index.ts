@@ -62,6 +62,25 @@ export interface SqlRunProgress {
   batchRows?: number;
 }
 
+export interface SqlRunOptions {
+  startRow?: number;
+  maxRows?: number;
+}
+
+export interface SqlRunResult {
+  ok: boolean;
+  message: string;
+  columns?: string[];
+  rows?: unknown[][];
+  partial?: boolean;
+}
+
+export interface FolderRunConfig {
+  selectedPaths: string[];
+  startRow?: number;
+  maxRows?: number;
+}
+
 export type ExtensionMessage =
   | { type: "RUN_SQL_FILE"; path: string; tabId: number; runId: string; offset: number; limit: number; iteration: number }
   | { type: "CLEAR_SQL_RUN"; runId: string; tabId: number }
@@ -76,5 +95,5 @@ export type ScanResult =
   | { ok: false; error: string };
 
 export type SqlChunkResponse =
-  | { ok: true; message: string; columns: string[]; rows: unknown[][]; hasMore: boolean }
+  | { ok: true; message: string; columns: string[]; rows: unknown[][]; hasMore: boolean; continuation?: boolean; pageSize?: number }
   | { ok: false; message: string };

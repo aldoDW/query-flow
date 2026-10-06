@@ -16,22 +16,46 @@ const idleActionIcons = {
 
 const openedPanelWindows = new Set<number>();
 
+function isContextInvalidated(error: unknown): boolean {
+  return error instanceof Error && /extension context invalidated/i.test(error.message);
+}
+
+function reportLifecycleError(message: string, error: unknown): void {
+  if (!isContextInvalidated(error)) console.warn(message, error);
+}
+
+function updateActionIcon(path: Record<number, string>): void {
+  try {
+    void chrome.action.setIcon({ path }).catch((error: unknown) => reportLifecycleError("QueryFlow could not update its action icon.", error));
+  } catch (error) {
+    reportLifecycleError("QueryFlow could not update its action icon.", error);
+  }
+}
+
+function configureSidePanel(): void {
+  try {
+    void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch((error: unknown) => reportLifecycleError("QueryFlow could not configure its side panel.", error));
+  } catch (error) {
+    reportLifecycleError("QueryFlow could not configure its side panel.", error);
+  }
+}
+
 chrome.sidePanel.onOpened?.addListener(({ windowId }) => {
   openedPanelWindows.add(windowId);
-  void chrome.action.setIcon({ path: activeActionIcons });
+  updateActionIcon(activeActionIcons);
 });
 
 chrome.sidePanel.onClosed?.addListener(({ windowId }) => {
   openedPanelWindows.delete(windowId);
-  if (openedPanelWindows.size === 0) void chrome.action.setIcon({ path: idleActionIcons });
+  if (openedPanelWindows.size === 0) updateActionIcon(idleActionIcons);
 });
 
 chrome.runtime.onInstalled.addListener(() => {
-  void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+  configureSidePanel();
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+  configureSidePanel();
 });
 
 chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) => {
