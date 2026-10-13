@@ -46,13 +46,13 @@ QueryFlow menyimpan salinan lokal (snapshot). Jika isi file SQL berubah, impor f
  Klik **Stop** untuk menghentikan proses. Hasil yang sudah diterima tetap diunduh sebagai Excel parsial atau ZIP parsial sesuai pengaturan folder.
 - Klik nama file untuk melihat SQL; gunakan **Copy** untuk menyalin SQL dengan filter wilayah yang dipilih.
 
-Hasil setiap query menjadi satu sheet Excel. Tanpa pemisahan kolom, hasil satu folder digabung dalam satu workbook; file besar dapat dipecah menjadi beberapa bagian bernomor. Jika satu query gagal, hasil yang sudah terkumpul tetap diunduh sebagai output parsial.
+Hasil setiap query menjadi satu sheet Excel. Tanpa pemisahan kolom, hasil satu folder digabung dalam satu workbook; file besar dapat dipecah menjadi beberapa bagian bernomor. Nama file Excel menyertakan tanggal ekspor (`YYYY-MM-DD`). Jika satu query gagal, hasil yang sudah terkumpul tetap diunduh sebagai output parsial.
 
 ### Filter wilayah
 
 ### Pisahkan hasil menurut kolom
 
-Di pengaturan setiap folder, isi **Pisahkan berdasarkan kolom** untuk membuat workbook terpisah bagi setiap nilai unik. Kolom kedua bersifat opsional; jika diisi, setiap kombinasi kedua nilai menjadi satu workbook. Nama yang dimasukkan harus tersedia pada header hasil semua query terpilih. Pencocokan mengabaikan huruf besar/kecil dan spasi di awal/akhir.
+Di pengaturan setiap folder, isi **Pisahkan berdasarkan kolom** untuk membuat workbook terpisah bagi setiap nilai unik. Kolom kedua bersifat opsional; jika diisi, setiap kombinasi kedua nilai menjadi satu workbook. Nama file workbook menampilkan nilai kolom pembagi dan tanggal ekspor; jika label yang sudah dibersihkan bertabrakan, akhiran angka membedakannya. Nama kolom yang dimasukkan harus tersedia pada header hasil semua query terpilih. Pencocokan mengabaikan huruf besar/kecil dan spasi di awal/akhir.
 
 QueryFlow memeriksa header dari hasil SQL Lab saat query mulai, tanpa menjalankan query tambahan. Jika kolom tidak ditemukan atau nama header ambigu, batch berhenti sebelum menerima baris query tersebut. Nilai kolom yang kosong atau `NULL` masuk ke kelompok `(blank)`. Batas halaman SQL tidak memulai kelompok baru; nilai yang sama tetap masuk ke workbook yang sama lintas halaman dan file SQL.
 

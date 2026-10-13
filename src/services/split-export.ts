@@ -1,6 +1,6 @@
 import JSZip from "jszip";
 import { ChunkedExport, EXPORT_CHECKPOINT_ROWS, MAX_EXPORT_BYTES } from "./chunked-export";
-import { serializeWorkbook, workbookFilename, type QueryResult } from "./excel";
+import { localDateStamp, serializeWorkbook, workbookFilename, type QueryResult } from "./excel";
 
 type ArchiveEntry = { name: string; bytes: Uint8Array };
 type ArchiveDownload = (filename: string, bytes: Uint8Array) => Promise<void>;
@@ -74,22 +74,27 @@ function displayValue(value: unknown): string {
   return String(value);
 }
 
-function slug(value: string): string {
-  const normalized = value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
-  return normalized.toLowerCase().replace(/[^a-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "") || "blank";
+function safeFilenameText(value: string): string {
+  return [...value].map((character) => {
+    const code = character.charCodeAt(0);
+    return /[<>:"/\\|?*]/.test(character) || code < 32 || code === 127 ? " " : character;
+  }).join("");
 }
 
-function hashKey(value: string): string {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index++) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(36).padStart(7, "0");
+function readableLabel(values: unknown[]): string {
+  return safeFilenameText(values.map(displayValue).join(" - "))
+    .replace(/\s+/g, " ")
+    .replace(/[. ]+$/g, "")
+    .trim()
+    .slice(0, 60) || "blank";
 }
 
 function safeWorkbookPath(path: string): string {
-  return path.replace(/[^a-z0-9_-]/gi, "_").replace(/^_+|_+$/g, "").slice(0, 120) || "hasil";
+  return safeFilenameText(path)
+    .replace(/\s+/g, " ")
+    .replace(/[. ]+$/g, "")
+    .trim()
+    .slice(0, 120) || "hasil";
 }
 
 async function downloadArchive(filename: string, bytes: Uint8Array): Promise<void> {
@@ -115,6 +120,7 @@ export class SplitChunkedExport implements FolderExportOutput {
   private readonly maxArchiveBytes: number;
   private readonly serialize: WorkbookSerialize;
   private readonly archiveDownload: ArchiveDownload;
+  private readonly exportDate: string;
   private checkpointRowCount = 0;
   totalRows = 0;
   parts = 0;
@@ -131,7 +137,8 @@ export class SplitChunkedExport implements FolderExportOutput {
     }
     const configError = validateSplitColumnInputs(this.requestedColumns[0] ?? "", this.requestedColumns[1] ?? "");
     if (configError) throw new Error(configError);
-    this.workbookBase = workbookFilename(path).replace(/\.xlsx$/i, "");
+    this.exportDate = localDateStamp();
+    this.workbookBase = workbookFilename(path, false, this.exportDate).replace(/\.xlsx$/i, "");
     this.checkpointRows = options.checkpointRows ?? EXPORT_CHECKPOINT_ROWS;
     this.maxWorkbookBytes = options.maxWorkbookBytes ?? MAX_EXPORT_BYTES;
     this.maxArchiveBytes = options.maxArchiveBytes ?? MAX_EXPORT_BYTES + 64 * 1024;
@@ -170,8 +177,12 @@ export class SplitChunkedExport implements FolderExportOutput {
     for (const [key, groupRows] of groupedRows) {
       let group = this.groups.get(key);
       if (!group) {
-        const label = groupRows.values.map(displayValue).map(slug).join("_").slice(0, 40) || "blank";
-        const stem = `${this.workbookBase.slice(0, 40)}_${label}_${hashKey(key)}`;
+        const datedSuffix = `_${this.exportDate}`;
+        const folderPrefix = this.workbookBase.endsWith(datedSuffix)
+          ? this.workbookBase.slice(0, -datedSuffix.length)
+          : this.workbookBase;
+        const label = readableLabel(groupRows.values);
+        const stem = `${folderPrefix.slice(0, 40)}_${label}_${this.exportDate}`;
         let path = stem;
         let collisionIndex = 2;
         while (this.usedWorkbookPaths.has(path)) path = `${stem}_${collisionIndex++}`;
