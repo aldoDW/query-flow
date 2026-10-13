@@ -159,7 +159,42 @@ export class SplitChunkedExport implements FolderExportOutput {
     this.indexesByFile.set(filename, { headers: normalizedHeaders, indexes });
   }
 
+  private getOrCreateGroup(key: string, label: string): { output: ChunkedExport } {
+    const existing = this.groups.get(key);
+    if (existing) return existing;
+
+    const datedSuffix = `_${this.exportDate}`;
+    const folderPrefix = this.workbookBase.endsWith(datedSuffix)
+      ? this.workbookBase.slice(0, -datedSuffix.length)
+      : this.workbookBase;
+    const stem = `${folderPrefix.slice(0, 40)}_${readableLabel([label])}_${this.exportDate}`;
+    let path = stem;
+    let collisionIndex = 2;
+    while (this.usedWorkbookPaths.has(path)) path = `${stem}_${collisionIndex++}`;
+    this.usedWorkbookPaths.add(path);
+    const group = {
+      output: new ChunkedExport(
+        path,
+        async (workbookPath, bytes) => {
+          this.pendingEntries.push({ name: `${safeWorkbookPath(workbookPath)}.xlsx`, bytes });
+        },
+        this.maxWorkbookBytes,
+        this.serialize,
+      ),
+    };
+    this.groups.set(key, group);
+    return group;
+  }
+
   async append(result: QueryResult): Promise<void> {
+    if (result.rows.length === 0) {
+      const emptyKey = JSON.stringify(["empty-result", result.filename]);
+      const queryName = result.title.trim() || result.filename.replace(/^.*[\\/]/, "").replace(/\.sql$/i, "");
+      const group = this.getOrCreateGroup(emptyKey, `No data - ${queryName}`);
+      await group.output.append(result);
+      return;
+    }
+
     this.validateHeaders(result.filename, result.columns);
     const indexes = this.indexesByFile.get(result.filename)?.indexes;
     if (!indexes) throw new Error(`Header hasil tidak tervalidasi pada ${result.filename}.`);
@@ -175,29 +210,7 @@ export class SplitChunkedExport implements FolderExportOutput {
     }
 
     for (const [key, groupRows] of groupedRows) {
-      let group = this.groups.get(key);
-      if (!group) {
-        const datedSuffix = `_${this.exportDate}`;
-        const folderPrefix = this.workbookBase.endsWith(datedSuffix)
-          ? this.workbookBase.slice(0, -datedSuffix.length)
-          : this.workbookBase;
-        const label = readableLabel(groupRows.values);
-        const stem = `${folderPrefix.slice(0, 40)}_${label}_${this.exportDate}`;
-        let path = stem;
-        let collisionIndex = 2;
-        while (this.usedWorkbookPaths.has(path)) path = `${stem}_${collisionIndex++}`;
-        this.usedWorkbookPaths.add(path);
-        const output = new ChunkedExport(
-          path,
-          async (workbookPath, bytes) => {
-            this.pendingEntries.push({ name: `${safeWorkbookPath(workbookPath)}.xlsx`, bytes });
-          },
-          this.maxWorkbookBytes,
-          this.serialize,
-        );
-        group = { output };
-        this.groups.set(key, group);
-      }
+      const group = this.getOrCreateGroup(key, readableLabel(groupRows.values));
       await group.output.append({ ...result, rows: groupRows.rows });
     }
 

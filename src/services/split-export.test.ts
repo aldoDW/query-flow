@@ -76,6 +76,22 @@ describe("partitioned checkpoint ZIP export", () => {
     expect(names[0]).toMatch(/_\d{4}-\d{2}-\d{2}\.xlsx$/);
   });
 
+  it("exports an empty query with its title without requiring split headers", async () => {
+    const { output, downloads } = setup();
+    const emptyResult = result("empty.sql", [], []);
+    emptyResult.title = "Empty query title";
+
+    await expect(output.append(emptyResult)).resolves.toBeUndefined();
+    await output.flush(true);
+
+    const archive = await readArchive(downloads[0]!.bytes);
+    const names = Object.keys(archive.files).filter((name) => name.endsWith(".xlsx"));
+    expect(names).toHaveLength(1);
+    expect(names[0]).toContain("No data - Empty query title");
+    const workbookFile = archive.file(names[0]!);
+    expect(JSON.parse(await workbookFile!.async("string"))).toEqual([emptyResult]);
+  });
+
   it("keeps readable filenames unique when sanitized labels collide", async () => {
     const { output, downloads } = setup();
     await output.append(result("q.sql", ["kab", "kategori", "value"], [["A/B", "F", 1], ["A:B", "F", 2]]));
