@@ -3,6 +3,35 @@ import type { SqlChunkResponse } from "../types";
 
 export const MAX_EXPORT_BYTES = 20 * 1024 * 1024;
 export const EXPORT_CHECKPOINT_ROWS = 250_000;
+export const RATE_LIMIT_MAX_RETRIES = 3;
+export const RATE_LIMIT_DEFAULT_COOLDOWN_MS = 60_000;
+
+function isRateLimitError(message: string): boolean {
+  return /\b429\b|too many requests|rate.?limit/i.test(message);
+}
+
+function rateLimitCooldownMs(message: string): number {
+  const retryAfter = message.match(/retry[- ]after\s*[:=]?\s*(\d+(?:\.\d+)?)/i);
+  if (!retryAfter) return RATE_LIMIT_DEFAULT_COOLDOWN_MS;
+  return Math.max(1_000, Math.ceil(Number(retryAfter[1]) * 1_000));
+}
+
+async function waitForRetry(delayMs: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) throw new Error("Run dihentikan oleh pengguna.");
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    }, delayMs);
+    const abort = (): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+      reject(new Error("Run dihentikan oleh pengguna."));
+    };
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
+  });
+}
 
 /** Retrieval pages are accumulated into one workbook, independent of table boundaries. */
 export class ChunkedExport {
@@ -91,6 +120,7 @@ export async function collectQuery(
   let collectedRows = 0;
   let limit = Math.min(9000, maxRows ?? 9000);
   let iteration = 1;
+  let rateLimitRetries = 0;
   while (!stopped()) {
     let response: SqlChunkResponse;
     try {
@@ -115,6 +145,16 @@ export async function collectQuery(
     }
     if (!response.ok) {
       if (stopped()) break;
+      if (isRateLimitError(response.message)) {
+        if (rateLimitRetries >= RATE_LIMIT_MAX_RETRIES) {
+          throw new Error(`SQL Lab masih membatasi permintaan setelah ${RATE_LIMIT_MAX_RETRIES} percobaan ulang: ${response.message}`);
+        }
+        rateLimitRetries++;
+        const cooldownMs = rateLimitCooldownMs(response.message);
+        report(`SQL Lab membatasi permintaan (429). Menunggu ${Math.ceil(cooldownMs / 1_000)} detik sebelum mencoba ulang (${rateLimitRetries}/${RATE_LIMIT_MAX_RETRIES}); hasil sebelumnya tetap disimpan.`);
+        await waitForRetry(cooldownMs, signal);
+        continue;
+      }
       if (limit > 1 && /exceed|too (?:large|big)|size.{0,30}limit|limit.{0,30}(?:size|bytes|mb)|payload|out of memory/i.test(response.message)) {
         limit = Math.max(1, Math.floor(limit / 2));
         report(`Batas ukuran tercapai. Mengulang dari baris ${offset + 1} dengan chunk ${limit} baris…`);
@@ -122,6 +162,7 @@ export async function collectQuery(
       }
       throw new Error(response.message);
     }
+    rateLimitRetries = 0;
     if (response.rows.length) options.onColumns?.(response.columns);
     // A chunk that finished concurrently with Stop is still valid and exported.
     if (response.rows.length) await accept(response.columns, response.rows);

@@ -1,7 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
-import { ChunkedExport, collectQuery } from "./chunked-export";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ChunkedExport, collectQuery, RATE_LIMIT_MAX_RETRIES } from "./chunked-export";
 import { serializeWorkbook, type QueryResult } from "./excel";
 import type { SqlChunkResponse } from "../types";
+
+afterEach(() => { vi.useRealTimers(); });
 
 const result = (rows: unknown[][], filename = "a.sql"): QueryResult => ({ filename, title: filename, columns: ["id"], rows });
 const chunk = (rows: unknown[][], hasMore = false, continuation = false, pageSize?: number): SqlChunkResponse => ({
@@ -176,6 +178,51 @@ describe("automatic chunk collection", () => {
 
     await expect(collectQuery(request, accept, () => false, vi.fn())).rejects.toThrow(/without confirming.*The query returned no data/i);
     expect(accept).not.toHaveBeenCalled();
+  });
+
+  it("waits 60 seconds and retries a rate-limited SQL request at the same offset", async () => {
+    vi.useFakeTimers();
+    const request = vi.fn<(...args: number[]) => Promise<SqlChunkResponse>>()
+      .mockResolvedValueOnce({ ok: false, message: "429 Too Many Requests: 30 per 1 minute" })
+      .mockResolvedValueOnce(chunk([[1]]));
+    const accept = vi.fn(async () => {});
+    const report = vi.fn();
+    const pending = collectQuery(request, accept, () => false, report);
+
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(request).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(pending).resolves.toBeUndefined();
+
+    expect(request.mock.calls).toEqual([[0, 9000, 1], [0, 9000, 1]]);
+    expect(report).toHaveBeenCalledWith(expect.stringMatching(/429.*60 detik.*1\/3/i));
+    expect(accept).toHaveBeenCalledWith(["id"], [[1]]);
+  });
+
+  it("stops retrying after the configured number of rate-limit retries", async () => {
+    vi.useFakeTimers();
+    const request = vi.fn<(...args: number[]) => Promise<SqlChunkResponse>>()
+      .mockResolvedValue({ ok: false, message: "429 Too Many Requests" });
+    const pending = collectQuery(request, vi.fn(async () => {}), () => false, vi.fn());
+    const assertion = expect(pending).rejects.toThrow(/setelah 3 percobaan ulang/i);
+
+    await vi.runAllTimersAsync();
+
+    await assertion;
+    expect(request).toHaveBeenCalledTimes(RATE_LIMIT_MAX_RETRIES + 1);
+  });
+
+  it("can cancel the rate-limit cooldown", async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const request = vi.fn(async (): Promise<SqlChunkResponse> => ({ ok: false, message: "429 Too Many Requests" }));
+    const report = vi.fn();
+    const pending = collectQuery(request, vi.fn(async () => {}), () => controller.signal.aborted, report, controller.signal);
+    await vi.waitFor(() => expect(report).toHaveBeenCalled());
+    controller.abort();
+
+    await expect(pending).rejects.toThrow(/dihentikan/i);
+    expect(request).toHaveBeenCalledTimes(1);
   });
 
   it("retries a failed SQL request at the same offset with a smaller query page", async () => {

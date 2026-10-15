@@ -6,11 +6,12 @@ afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 function setup(data: Record<string, unknown>[], state = "success") {
   vi.useFakeTimers();
   const queries: Record<string, unknown> = {};
+  let queryIndex = 0;
   let sql = "";
   const editor = { getClientRects: () => [1], env: { editor: { setValue: (value: string) => { sql = value; }, clearSelection: () => {} } } };
   const node = { __reactFiber$test: { memoizedProps: { store: { getState: () => ({ sqlLab: { queries } }) } } } };
   const run = { textContent: "Run", disabled: false, getClientRects: () => [1], click: vi.fn(() => {
-    queries["q1"] = { sql, state, results: { columns: [{ name: "id" }], data } };
+    queries[`q${++queryIndex}`] = { sql, state, results: { columns: [{ name: "id" }], data } };
   }) };
   vi.stubGlobal("document", { querySelectorAll: (selector: string) => selector === ".ace_editor" ? [editor] : selector === "button" ? [run] : [node] });
   vi.stubGlobal("window", { location: { origin: "https://example.test" }, postMessage: vi.fn() });
@@ -77,4 +78,19 @@ it("keeps a result completed concurrently with cancellation", async () => {
   stopSqlLabRun("run");
   await vi.advanceTimersByTimeAsync(300);
   expect(await promise).toMatchObject({ ok: true, rows: [[1]], hasMore: false });
+});
+
+it("paces SQL submissions to at least 2.4 seconds apart per SQL Lab tab", async () => {
+  const { run } = setup([{ id: 1 }]);
+  const first = runInSqlLabChunk("select id from t", "run-1", "a.sql", 0, 9000, 1);
+  await vi.advanceTimersByTimeAsync(300);
+  expect((await first).ok).toBe(true);
+
+  const second = runInSqlLabChunk("select id from t", "run-2", "a.sql", 0, 9000, 1);
+  await vi.advanceTimersByTimeAsync(2_099);
+  expect(run.click).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(601);
+
+  expect((await second).ok).toBe(true);
+  expect(run.click).toHaveBeenCalledTimes(2);
 });

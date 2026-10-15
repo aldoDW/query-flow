@@ -5,6 +5,8 @@ export async function runInSqlLabChunk(baseSql: string, runId: string, path: str
   const runtimeWindow = window as typeof window & {
     __queryFlowCancelledRuns?: Record<string, boolean>;
     __queryFlowPageCursors?: Record<string, { offset: number; queryId: string; nextRow: number; pageEnd: number; hasMore: boolean }>;
+    __queryFlowSqlLaunchTimes?: number[];
+    __queryFlowLastSqlLaunchAt?: number;
   };
   runtimeWindow.__queryFlowCancelledRuns ??= {};
   runtimeWindow.__queryFlowPageCursors ??= {};
@@ -12,6 +14,32 @@ export async function runInSqlLabChunk(baseSql: string, runId: string, path: str
   function throwIfCancelled(): void {
     if (runtimeWindow.__queryFlowCancelledRuns?.[runId]) {
       throw new Error("Run dihentikan oleh pengguna.");
+    }
+  }
+
+  async function waitForSqlLaunchSlot(): Promise<void> {
+    const minIntervalMs = 2_400;
+    const windowMs = 60_000;
+    const maxLaunchesPerWindow = 25;
+    while (true) {
+      throwIfCancelled();
+      const now = Date.now();
+      const launches = (runtimeWindow.__queryFlowSqlLaunchTimes ?? [])
+        .filter((timestamp) => now - timestamp < windowMs);
+      runtimeWindow.__queryFlowSqlLaunchTimes = launches;
+      const intervalWait = runtimeWindow.__queryFlowLastSqlLaunchAt === undefined
+        ? 0
+        : Math.max(0, runtimeWindow.__queryFlowLastSqlLaunchAt + minIntervalMs - now);
+      const windowWait = launches.length >= maxLaunchesPerWindow
+        ? Math.max(0, launches[0]! + windowMs - now)
+        : 0;
+      const waitMs = Math.max(intervalWait, windowWait);
+      if (waitMs <= 0) {
+        runtimeWindow.__queryFlowSqlLaunchTimes.push(now);
+        runtimeWindow.__queryFlowLastSqlLaunchAt = now;
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, Math.min(waitMs, 250)));
     }
   }
   
@@ -154,6 +182,8 @@ export async function runInSqlLabChunk(baseSql: string, runId: string, path: str
       const editor = element.env?.editor;
       if (!editor) throw new Error("Editor SQL Lab belum dapat diakses.");
 
+      await waitForSqlLaunchSlot();
+      throwIfCancelled();
       const buttons = [...document.querySelectorAll<HTMLButtonElement>("button")].filter(visible);
       if (buttons.some((button) => /^stop(?: query)?$/i.test(button.textContent?.trim() ?? ""))) {
         throw new Error("Query masih berjalan. Tunggu selesai.");

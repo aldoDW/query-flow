@@ -48,6 +48,8 @@ QueryFlow menyimpan salinan lokal (snapshot). Jika isi file SQL berubah, impor f
 
 Hasil setiap query menjadi satu sheet Excel. Tanpa pemisahan kolom, hasil satu folder digabung dalam satu workbook; file besar dapat dipecah menjadi beberapa bagian bernomor. Nama file Excel menyertakan tanggal ekspor (`YYYY-MM-DD`). Hanya hasil sukses SQL Lab dengan pesan `The query returned no data` yang diekspor sebagai workbook kosong berisi judul dan header (jika tersedia), lalu proses folder berlanjut ke query berikutnya. Error database atau balasan kosong tanpa konfirmasi tersebut tetap dianggap gagal. Jika satu query gagal, hasil yang sudah terkumpul tetap diunduh sebagai output parsial.
 
+QueryFlow membatasi pengiriman query ke SQL Lab hingga maksimal 25 query per 60 detik, dengan jarak minimal 2,4 detik antar-pengiriman. Jika SQL Lab tetap mengembalikan error `429 Too Many Requests`, QueryFlow menunggu 60 detik (atau waktu `Retry-After` jika tersedia pada pesan error) lalu mencoba ulang permintaan yang sama hingga tiga kali. Proses dapat dihentikan selama menunggu; hasil yang sudah terkumpul tetap dipertahankan.
+
 ### Filter wilayah
 
 ### Pisahkan hasil menurut kolom
